@@ -149,7 +149,14 @@ class TradingAgentsGraph:
         return {
             "market": ToolNode(
                 [
-                    # online tools
+                    # 中国A股工具 - 通达信API
+                    self.toolkit.get_china_stock_data,
+                    self.toolkit.get_china_market_overview,
+                    # 中国A股基本信息 - Tushare Pro（股票名称）
+                    self.toolkit.get_tushare_stock_basic,
+                    # 中国A股估值工具 - Tushare Pro（PE/PB/市值/换手率）
+                    self.toolkit.get_tushare_daily_basic,
+                    # 美股/其他市场工具 - Yahoo Finance (online)
                     self.toolkit.get_YFin_data_online,
                     self.toolkit.get_stockstats_indicators_report_online,
                     # offline tools
@@ -159,6 +166,19 @@ class TradingAgentsGraph:
             ),
             "social": ToolNode(
                 [
+                    # 中国A股基本信息 - Tushare Pro（股票名称）
+                    self.toolkit.get_tushare_stock_basic,
+                    # 中国A股情绪工具 - Tushare Pro（高质量数据）
+                    self.toolkit.get_tushare_moneyflow,          # 资金流向（大/中/小单）
+                    self.toolkit.get_tushare_hsgt_flow,          # 北向资金
+                    self.toolkit.get_tushare_margin,             # 融资融券
+                    self.toolkit.get_tushare_top10_holders,      # 前十大股东
+                    self.toolkit.get_tushare_holder_number,      # 股东人数（筹码集中度）
+                    self.toolkit.get_tushare_top_list,           # 龙虎榜
+                    self.toolkit.get_tushare_sentiment_comprehensive,  # 综合情绪数据包
+                    # 中国A股情绪工具 - akshare（备用）
+                    self.toolkit.get_china_stock_sentiment,
+                    self.toolkit.get_china_money_flow,
                     # online tools
                     self.toolkit.get_stock_news_openai,
                     # offline tools
@@ -167,6 +187,13 @@ class TradingAgentsGraph:
             ),
             "news": ToolNode(
                 [
+                    # 中国A股基本信息 - Tushare Pro（股票名称）
+                    self.toolkit.get_tushare_stock_basic,
+                    # 中国财经新闻工具 - akshare
+                    self.toolkit.get_china_stock_news,
+                    self.toolkit.get_china_market_news,
+                    # 中国宏观经济 - Tushare Pro
+                    self.toolkit.get_tushare_pmi,                # PMI采购经理指数
                     # online tools
                     self.toolkit.get_global_news_openai,
                     self.toolkit.get_google_news,
@@ -177,6 +204,18 @@ class TradingAgentsGraph:
             ),
             "fundamentals": ToolNode(
                 [
+                    # 中国A股基本面工具 - Tushare Pro（高质量数据，优先使用）
+                    self.toolkit.get_tushare_financial_statements,      # 财务三表（利润表/资产负债表/现金流）
+                    self.toolkit.get_tushare_financial_indicators,      # 财务指标（150+指标）
+                    self.toolkit.get_tushare_daily_basic,               # 每日估值（PE/PB/市值）
+                    self.toolkit.get_tushare_forecast,                  # 业绩预告
+                    self.toolkit.get_tushare_dividend,                  # 分红历史
+                    self.toolkit.get_tushare_stock_basic,               # 股票基本信息（准确名称）
+                    self.toolkit.get_tushare_fundamentals_comprehensive, # 基本面综合数据包
+                    # 中国A股基本面工具 - akshare（备用）
+                    self.toolkit.get_china_financial_report,
+                    self.toolkit.get_china_stock_indicators,
+                    self.toolkit.get_china_earnings_forecast,
                     # online tools
                     self.toolkit.get_fundamentals_openai,
                     # offline tools
@@ -185,6 +224,19 @@ class TradingAgentsGraph:
                     self.toolkit.get_simfin_balance_sheet,
                     self.toolkit.get_simfin_cashflow,
                     self.toolkit.get_simfin_income_stmt,
+                ]
+            ),
+            "china_market": ToolNode(
+                [
+                    # 中国A股数据 - 通达信API（行情数据）
+                    self.toolkit.get_china_stock_data,
+                    self.toolkit.get_china_market_overview,
+                    # 中国A股数据 - Tushare Pro（估值数据）
+                    self.toolkit.get_tushare_daily_basic,
+                    self.toolkit.get_tushare_stock_basic,
+                    # 备用数据源
+                    self.toolkit.get_YFin_data_online,
+                    self.toolkit.get_stockstats_indicators_report_online,
                 ]
             ),
         }
@@ -254,6 +306,8 @@ class TradingAgentsGraph:
             },
             "investment_plan": final_state["investment_plan"],
             "final_trade_decision": final_state["final_trade_decision"],
+            # 综合研报（仅A股）
+            "consolidation_report": final_state.get("consolidation_report", ""),
         }
 
         # Save to file

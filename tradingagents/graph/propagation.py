@@ -39,6 +39,7 @@ class Propagator:
             "fundamentals_report": "",
             "sentiment_report": "",
             "news_report": "",
+            "consolidation_report": "",  # 综合研报（仅A股）
         }
 
     def get_graph_args(self) -> Dict[str, Any]:

@@ -19,6 +19,8 @@ from .managers.risk_manager import create_risk_manager
 
 from .trader.trader import create_trader
 
+from .consolidation.consolidation_analyst import create_consolidation_analyst
+
 __all__ = [
     "FinancialSituationMemory",
     "Toolkit",
@@ -38,4 +40,5 @@ __all__ = [
     "create_safe_debator",
     "create_social_media_analyst",
     "create_trader",
+    "create_consolidation_analyst",
 ]

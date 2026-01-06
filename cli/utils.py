@@ -218,49 +218,53 @@ def select_research_depth() -> int:
     return choice
 
 
-def select_shallow_thinking_agent(provider) -> str:
-    """Select shallow thinking llm engine using an interactive selection."""
+def select_thinking_agent(provider) -> str:
+    """Select LLM engine using an interactive selection."""
 
-    # Define shallow thinking llm engine options with their corresponding model names
-    SHALLOW_AGENT_OPTIONS = {
+    # Define LLM engine options with their corresponding model names
+    AGENT_OPTIONS = {
         "dashscope (alibaba cloud)": [
-            ("Qwen-Turbo - Fast response, suitable for quick tasks", "qwen-turbo"),
-            ("Qwen-Plus - Balanced performance and cost", "qwen-plus"),
-            ("Qwen-Max - Best performance for complex analysis", "qwen-max"),
+            ("Qwen-Turbo - 快速响应", "qwen-turbo"),
+            ("Qwen-Plus - 性价比均衡 (推荐)", "qwen-plus"),
+            ("Qwen-Max - 最强性能", "qwen-max"),
+            ("Qwen-Max-LongContext - 超长上下文", "qwen-max-longcontext"),
         ],
         "openai": [
-            ("GPT-4o-mini - Fast and efficient for quick tasks", "gpt-4o-mini"),
-            ("GPT-4.1-nano - Ultra-lightweight model for basic operations", "gpt-4.1-nano"),
-            ("GPT-4.1-mini - Compact model with good performance", "gpt-4.1-mini"),
-            ("GPT-4o - Standard model with solid capabilities", "gpt-4o"),
+            ("GPT-4.1 nano - 最快最便宜 (1M上下文)", "gpt-4.1-nano"),
+            ("GPT-4.1 mini - 快速高效 (1M上下文)", "gpt-4.1-mini"),
+            ("GPT-4.1 - 最智能非推理模型 (1M上下文)", "gpt-4.1"),
+            ("GPT-4o mini - 经济实惠", "gpt-4o-mini"),
+            ("GPT-4o - 旗舰多模态模型", "gpt-4o"),
+            ("o4-mini - 快速推理模型", "o4-mini"),
+            ("o3 - 高级推理模型", "o3"),
         ],
         "anthropic": [
-            ("Claude Haiku 3.5 - Fast inference and standard capabilities", "claude-3-5-haiku-latest"),
-            ("Claude Sonnet 3.5 - Highly capable standard model", "claude-3-5-sonnet-latest"),
-            ("Claude Sonnet 3.7 - Exceptional hybrid reasoning and agentic capabilities", "claude-3-7-sonnet-latest"),
-            ("Claude Sonnet 4 - High performance and excellent reasoning", "claude-sonnet-4-0"),
+            ("Claude 3.5 Haiku - 快速推理", "claude-3-5-haiku-latest"),
+            ("Claude 3.5 Sonnet - 高能力标准模型", "claude-3-5-sonnet-latest"),
+            ("Claude 3.5 Opus - 最强大模型", "claude-3-opus-latest"),
         ],
         "google": [
-            ("Gemini 2.0 Flash-Lite - Cost efficiency and low latency", "gemini-2.0-flash-lite"),
-            ("Gemini 2.0 Flash - Next generation features, speed, and thinking", "gemini-2.0-flash"),
-            ("Gemini 2.5 Flash - Adaptive thinking, cost efficiency", "gemini-2.5-flash-preview-05-20"),
+            ("Gemini 2.0 Flash - 快速高效", "gemini-2.0-flash"),
+            ("Gemini 1.5 Pro - 专业级模型", "gemini-1.5-pro"),
+            ("Gemini 1.5 Flash - 平衡性能", "gemini-1.5-flash"),
         ],
         "openrouter": [
-            ("Meta: Llama 4 Scout", "meta-llama/llama-4-scout:free"),
-            ("Meta: Llama 3.3 8B Instruct - A lightweight and ultra-fast variant of Llama 3.3 70B", "meta-llama/llama-3.3-8b-instruct:free"),
-            ("google/gemini-2.0-flash-exp:free - Gemini Flash 2.0 offers a significantly faster time to first token", "google/gemini-2.0-flash-exp:free"),
+            ("Llama 4 Scout - Meta最新", "meta-llama/llama-4-scout"),
+            ("DeepSeek V3 - 高性价比", "deepseek/deepseek-chat-v3-0324:free"),
+            ("Gemini 2.0 Flash", "google/gemini-2.0-flash-exp:free"),
         ],
         "ollama": [
-            ("llama3.1 local", "llama3.1"),
-            ("llama3.2 local", "llama3.2"),
-        ]
+            ("Llama 3.1 本地", "llama3.1"),
+            ("Llama 3.2 本地", "llama3.2"),
+            ("Qwen3 本地", "qwen3"),
+        ],
     }
 
     choice = questionary.select(
-        "Select Your [Quick-Thinking LLM Engine]:",
+        "选择LLM模型:",
         choices=[
             questionary.Choice(display, value=value)
-            for display, value in SHALLOW_AGENT_OPTIONS[provider.lower()]
+            for display, value in AGENT_OPTIONS[provider.lower()]
         ],
         instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
         style=questionary.Style(
@@ -273,75 +277,7 @@ def select_shallow_thinking_agent(provider) -> str:
     ).ask()
 
     if choice is None:
-        console.print(
-            "\n[red]No shallow thinking llm engine selected. Exiting...[/red]"
-        )
-        exit(1)
-
-    return choice
-
-
-def select_deep_thinking_agent(provider) -> str:
-    """Select deep thinking llm engine using an interactive selection."""
-
-    # Define deep thinking llm engine options with their corresponding model names
-    DEEP_AGENT_OPTIONS = {
-        "dashscope (alibaba cloud)": [
-            ("Qwen-Plus - Balanced performance and cost (Recommended)", "qwen-plus"),
-            ("Qwen-Max - Best performance for complex analysis", "qwen-max"),
-            ("Qwen-Max-LongContext - Ultra-long context support", "qwen-max-longcontext"),
-            ("Qwen-Turbo - Fast response for lighter analysis", "qwen-turbo"),
-        ],
-        "openai": [
-            ("GPT-4.1-nano - Ultra-lightweight model for basic operations", "gpt-4.1-nano"),
-            ("GPT-4.1-mini - Compact model with good performance", "gpt-4.1-mini"),
-            ("GPT-4o - Standard model with solid capabilities", "gpt-4o"),
-            ("o4-mini - Specialized reasoning model (compact)", "o4-mini"),
-            ("o3-mini - Advanced reasoning model (lightweight)", "o3-mini"),
-            ("o3 - Full advanced reasoning model", "o3"),
-            ("o1 - Premier reasoning and problem-solving model", "o1"),
-        ],
-        "anthropic": [
-            ("Claude Haiku 3.5 - Fast inference and standard capabilities", "claude-3-5-haiku-latest"),
-            ("Claude Sonnet 3.5 - Highly capable standard model", "claude-3-5-sonnet-latest"),
-            ("Claude Sonnet 3.7 - Exceptional hybrid reasoning and agentic capabilities", "claude-3-7-sonnet-latest"),
-            ("Claude Sonnet 4 - High performance and excellent reasoning", "claude-sonnet-4-0"),
-            ("Claude Opus 4 - Most powerful Anthropic model", "	claude-opus-4-0"),
-        ],
-        "google": [
-            ("Gemini 2.0 Flash-Lite - Cost efficiency and low latency", "gemini-2.0-flash-lite"),
-            ("Gemini 2.0 Flash - Next generation features, speed, and thinking", "gemini-2.0-flash"),
-            ("Gemini 2.5 Flash - Adaptive thinking, cost efficiency", "gemini-2.5-flash-preview-05-20"),
-            ("Gemini 2.5 Pro", "gemini-2.5-pro-preview-06-05"),
-        ],
-        "openrouter": [
-            ("DeepSeek V3 - a 685B-parameter, mixture-of-experts model", "deepseek/deepseek-chat-v3-0324:free"),
-            ("Deepseek - latest iteration of the flagship chat model family from the DeepSeek team.", "deepseek/deepseek-chat-v3-0324:free"),
-        ],
-        "ollama": [
-            ("llama3.1 local", "llama3.1"),
-            ("qwen3", "qwen3"),
-        ]
-    }
-    
-    choice = questionary.select(
-        "Select Your [Deep-Thinking LLM Engine]:",
-        choices=[
-            questionary.Choice(display, value=value)
-            for display, value in DEEP_AGENT_OPTIONS[provider.lower()]
-        ],
-        instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
-        style=questionary.Style(
-            [
-                ("selected", "fg:magenta noinherit"),
-                ("highlighted", "fg:magenta noinherit"),
-                ("pointer", "fg:magenta noinherit"),
-            ]
-        ),
-    ).ask()
-
-    if choice is None:
-        console.print("\n[red]No deep thinking llm engine selected. Exiting...[/red]")
+        console.print("\n[red]No LLM model selected. Exiting...[/red]")
         exit(1)
 
     return choice

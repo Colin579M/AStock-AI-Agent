@@ -1,5 +1,4 @@
 import chromadb
-from chromadb.config import Settings
 from openai import OpenAI
 import os
 
@@ -74,14 +73,20 @@ class FinancialSituationMemory:
             self.embedding = "text-embedding-3-small"
             self.client = OpenAI(base_url=config["backend_url"])
 
-        self.chroma_client = chromadb.Client(Settings(allow_reset=True))
+        # 配置持久化存储路径
+        chroma_path = config.get(
+            "chroma_db_path",
+            os.path.join(os.path.expanduser("~"), "Documents", "TradingAgents", "chroma_db")
+        )
 
-        # Try to get existing collection, create new one if it doesn't exist
-        try:
-            self.situation_collection = self.chroma_client.get_collection(name=name)
-        except Exception:
-            # Collection doesn't exist, create new one
-            self.situation_collection = self.chroma_client.create_collection(name=name)
+        # 确保目录存在
+        os.makedirs(chroma_path, exist_ok=True)
+
+        # 使用持久化客户端（数据会保存到磁盘，程序重启后不丢失）
+        self.chroma_client = chromadb.PersistentClient(path=chroma_path)
+
+        # 获取或创建集合
+        self.situation_collection = self.chroma_client.get_or_create_collection(name=name)
 
     def get_embedding(self, text):
         """Get embedding for a text using the configured provider"""

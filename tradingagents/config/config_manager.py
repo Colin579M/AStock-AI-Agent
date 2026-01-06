@@ -150,7 +150,7 @@ class ConfigManager:
                 ),
                 ModelConfig(
                     provider="openai",
-                    model_name="gpt-3.5-turbo",
+                    model_name="gpt-5-mini",
                     api_key="",
                     max_tokens=4000,
                     temperature=0.7,
@@ -158,7 +158,7 @@ class ConfigManager:
                 ),
                 ModelConfig(
                     provider="openai",
-                    model_name="gpt-4",
+                    model_name="gpt-5",
                     api_key="",
                     max_tokens=8000,
                     temperature=0.7,
@@ -183,10 +183,16 @@ class ConfigManager:
                 PricingConfig("dashscope", "qwen-plus-latest", 0.004, 0.012, "CNY"),
                 PricingConfig("dashscope", "qwen-max", 0.02, 0.06, "CNY"),
                 
-                # OpenAI定价 (美元)
-                PricingConfig("openai", "gpt-3.5-turbo", 0.0015, 0.002, "USD"),
-                PricingConfig("openai", "gpt-4", 0.03, 0.06, "USD"),
-                PricingConfig("openai", "gpt-4-turbo", 0.01, 0.03, "USD"),
+                # OpenAI GPT-5 Series 定价 (美元, per 1K tokens)
+                PricingConfig("openai", "gpt-5.2", 0.00175, 0.014, "USD"),
+                PricingConfig("openai", "gpt-5.1", 0.00125, 0.010, "USD"),
+                PricingConfig("openai", "gpt-5", 0.00125, 0.010, "USD"),
+                PricingConfig("openai", "gpt-5-mini", 0.00025, 0.002, "USD"),
+                PricingConfig("openai", "gpt-5-nano", 0.00005, 0.0004, "USD"),
+                # OpenAI Reasoning Models
+                PricingConfig("openai", "o4-mini", 0.0011, 0.0044, "USD"),
+                PricingConfig("openai", "o3", 0.01, 0.04, "USD"),
+                PricingConfig("openai", "o1", 0.015, 0.06, "USD"),
                 
                 # Google定价 (美元)
                 PricingConfig("google", "gemini-pro", 0.00025, 0.0005, "USD"),

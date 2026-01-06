@@ -8,6 +8,8 @@ from langgraph.prebuilt import ToolNode
 from tradingagents.agents import *
 from tradingagents.agents.utils.agent_states import AgentState
 from tradingagents.agents.utils.agent_utils import Toolkit
+from tradingagents.agents.consolidation import create_consolidation_analyst
+from tradingagents.agents.consolidation.consolidation_analyst import is_china_stock
 
 from .conditional_logic import ConditionalLogic
 
@@ -108,6 +110,11 @@ class GraphSetup:
             self.deep_thinking_llm, self.risk_manager_memory
         )
 
+        # Create consolidation analyst node (for A-shares only)
+        consolidation_analyst_node = create_consolidation_analyst(
+            self.deep_thinking_llm
+        )
+
         # Create workflow
         workflow = StateGraph(AgentState)
 
@@ -128,6 +135,7 @@ class GraphSetup:
         workflow.add_node("Neutral Analyst", neutral_analyst)
         workflow.add_node("Safe Analyst", safe_analyst)
         workflow.add_node("Risk Judge", risk_manager_node)
+        workflow.add_node("Consolidation Report", consolidation_analyst_node)
 
         # Define edges
         # Start with the first analyst
@@ -199,7 +207,23 @@ class GraphSetup:
             },
         )
 
-        workflow.add_edge("Risk Judge", END)
+        # Conditional routing: A-shares go to Consolidation Report, others go to END
+        def should_generate_consolidation(state):
+            """Check if we should generate a consolidation report (A-shares only)"""
+            ticker = state.get("company_of_interest", "")
+            if is_china_stock(ticker):
+                return "Consolidation Report"
+            return END
+
+        workflow.add_conditional_edges(
+            "Risk Judge",
+            should_generate_consolidation,
+            {
+                "Consolidation Report": "Consolidation Report",
+                END: END,
+            },
+        )
+        workflow.add_edge("Consolidation Report", END)
 
         # Compile and return
         return workflow.compile()

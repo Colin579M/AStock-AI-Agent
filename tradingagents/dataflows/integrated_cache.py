@@ -117,22 +117,24 @@ class IntegratedCacheManager:
             # 使用传统缓存系统
             return self.legacy_cache.load_stock_data(cache_key)
     
-    def find_cached_stock_data(self, symbol: str, start_date: str = None, 
-                              end_date: str = None, data_source: str = "default") -> Optional[str]:
+    def find_cached_stock_data(self, symbol: str, start_date: str = None,
+                              end_date: str = None, data_source: str = "default",
+                              max_age_hours: int = None) -> Optional[str]:
         """
         查找缓存的股票数据
-        
+
         Args:
             symbol: 股票代码
             start_date: 开始日期
             end_date: 结束日期
             data_source: 数据源
-            
+            max_age_hours: 缓存最大有效时间（小时），仅部分底层缓存支持
+
         Returns:
             缓存键或None
         """
         if self.use_adaptive:
-            # 使用自适应缓存系统
+            # 使用自适应缓存系统（不支持 max_age_hours）
             return self.adaptive_cache.find_cached_data(
                 symbol=symbol,
                 start_date=start_date or "",
@@ -141,7 +143,7 @@ class IntegratedCacheManager:
                 data_type="stock_data"
             )
         else:
-            # 使用传统缓存系统
+            # 使用传统缓存系统（不支持 max_age_hours）
             return self.legacy_cache.find_cached_stock_data(
                 symbol=symbol,
                 start_date=start_date,

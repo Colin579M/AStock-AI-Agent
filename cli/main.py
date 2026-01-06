@@ -69,6 +69,7 @@ class MessageBuffer:
             "investment_plan": None,
             "trader_investment_plan": None,
             "final_trade_decision": None,
+            "consolidation_report": None,
         }
 
     def add_message(self, message_type, content):
@@ -110,6 +111,7 @@ class MessageBuffer:
                 "investment_plan": "Research Team Decision",
                 "trader_investment_plan": "Trading Team Plan",
                 "final_trade_decision": "Portfolio Management Decision",
+                "consolidation_report": "Consolidation Report",
             }
             self.current_report = (
                 f"### {section_titles[latest_section]}\n{latest_content}"
@@ -163,6 +165,11 @@ class MessageBuffer:
         if self.report_sections["final_trade_decision"]:
             report_parts.append("## Portfolio Management Decision")
             report_parts.append(f"{self.report_sections['final_trade_decision']}")
+
+        # Consolidation Report (A-share only)
+        if self.report_sections["consolidation_report"]:
+            report_parts.append("## Consolidation Report")
+            report_parts.append(f"{self.report_sections['consolidation_report']}")
 
         self.final_report = "\n\n".join(report_parts) if report_parts else None
 
@@ -481,14 +488,15 @@ def get_user_selections():
     )
     selected_llm_provider, backend_url = select_llm_provider()
     
-    # Step 7: Thinking agents
+    # Step 7: LLM Model
     console.print(
         create_question_box(
-            "Step 7: Thinking Agents", "Select your thinking agents for analysis"
+            "Step 7: 选择模型", "选择用于分析的LLM模型"
         )
     )
-    selected_shallow_thinker = select_shallow_thinking_agent(selected_llm_provider)
-    selected_deep_thinker = select_deep_thinking_agent(selected_llm_provider)
+    selected_model = select_thinking_agent(selected_llm_provider)
+    selected_shallow_thinker = selected_model
+    selected_deep_thinker = selected_model
 
     return {
         "market": selected_market,
@@ -710,6 +718,22 @@ def display_complete_report(final_state):
                     padding=(1, 2),
                 )
             )
+
+    # VI. Consolidation Report (A-share only)
+    if final_state.get("consolidation_report"):
+        console.print(
+            Panel(
+                Panel(
+                    Markdown(final_state["consolidation_report"]),
+                    title="Consolidation Analyst",
+                    border_style="blue",
+                    padding=(1, 2),
+                ),
+                title="VI. Consolidation Report (A-Share)",
+                border_style="gold1",
+                padding=(1, 2),
+            )
+        )
 
 
 def update_research_team_status(status):
@@ -1073,6 +1097,15 @@ def run_analysis():
                         message_buffer.update_agent_status(
                             "Portfolio Manager", "completed"
                         )
+
+                # Consolidation Report (A-share only)
+                if "consolidation_report" in chunk and chunk["consolidation_report"]:
+                    message_buffer.update_report_section(
+                        "consolidation_report", chunk["consolidation_report"]
+                    )
+                    message_buffer.add_message(
+                        "Reasoning", "Consolidation Report generated"
+                    )
 
                 # Update the display
                 update_display(layout)
