@@ -1,11 +1,16 @@
 from langchain_core.messages import AIMessage
 import time
 import json
+from tradingagents.agents.utils.state_utils import apply_invest_debate_limits
 
 
 def create_bear_researcher(llm, memory):
     def bear_node(state) -> dict:
         investment_debate_state = state["investment_debate_state"]
+
+        # 应用历史长度限制，防止context window溢出
+        investment_debate_state = apply_invest_debate_limits(investment_debate_state)
+
         history = investment_debate_state.get("history", "")
         bear_history = investment_debate_state.get("bear_history", "")
 
@@ -21,6 +26,16 @@ def create_bear_researcher(llm, memory):
         past_memory_str = ""
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
+
+        # 获取上次决策反思（如果有）
+        prev_decision_reflection = state.get("previous_decision_reflection", "")
+        reflection_context = ""
+        if prev_decision_reflection and "首次分析" not in prev_decision_reflection and "无历史决策" not in prev_decision_reflection:
+            reflection_context = f"""
+Previous decision reflection (IMPORTANT - learn from past mistakes/successes):
+{prev_decision_reflection}
+Consider this reflection when building your argument. If the previous decision was wrong, identify what risks were overlooked. If it was right, reinforce the risk factors that proved accurate.
+"""
 
         prompt = f"""You are a Bear Analyst making the case against investing in the stock. Your goal is to present a well-reasoned argument emphasizing risks, challenges, and negative indicators. Leverage the provided research and data to highlight potential downsides and counter bullish arguments effectively.
 
@@ -41,6 +56,7 @@ Company fundamentals report: {fundamentals_report}
 Conversation history of the debate: {history}
 Last bull argument: {current_response}
 Reflections from similar situations and lessons learned: {past_memory_str}
+{reflection_context}
 Use this information to deliver a compelling bear argument, refute the bull's claims, and engage in a dynamic debate that demonstrates the risks and weaknesses of investing in the stock. You must also address reflections and learn from lessons and mistakes you made in the past.
 """
 

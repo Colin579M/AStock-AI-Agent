@@ -77,3 +77,6 @@ class AgentState(MessagesState):
 
     # consolidation report (A-share only)
     consolidation_report: Annotated[str, "Consolidated investment research report for A-shares"]
+
+    # 上次决策反思报告 (用于自动反思闭环)
+    previous_decision_reflection: Annotated[str, "Reflection on previous analysis decision and its outcome"]
