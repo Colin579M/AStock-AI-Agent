@@ -6,6 +6,35 @@ import os
 from .config import get_config
 
 
+def _clean_yfinance_data(data: pd.DataFrame) -> pd.DataFrame:
+    """
+    清理 yfinance 下载的数据，移除无效行
+
+    yfinance 有时会在数据末尾添加垃圾数据（如 "1,0"），
+    这会导致日期解析失败。
+    """
+    if data.empty:
+        return data
+
+    # 确保 Date 列存在
+    if "Date" not in data.columns:
+        return data
+
+    # 转换 Date 列为 datetime，无效值设为 NaT
+    data["Date"] = pd.to_datetime(data["Date"], errors="coerce")
+
+    # 移除 Date 为 NaT 的行（无效日期）
+    data = data.dropna(subset=["Date"])
+
+    # 移除重复日期，保留第一个
+    data = data.drop_duplicates(subset=["Date"], keep="first")
+
+    # 按日期排序
+    data = data.sort_values("Date").reset_index(drop=True)
+
+    return data
+
+
 class StockstatsUtils:
     @staticmethod
     def get_stock_stats(
@@ -36,6 +65,8 @@ class StockstatsUtils:
                         f"{symbol}-YFin-data-2015-01-01-2025-03-25.csv",
                     )
                 )
+                # 清理离线数据中的无效行
+                data = _clean_yfinance_data(data)
                 df = wrap(data)
             except FileNotFoundError:
                 raise Exception("Stockstats fail: Yahoo Finance data not fetched yet!")
@@ -60,7 +91,8 @@ class StockstatsUtils:
 
             if os.path.exists(data_file):
                 data = pd.read_csv(data_file)
-                data["Date"] = pd.to_datetime(data["Date"])
+                # 清理缓存数据中的无效行
+                data = _clean_yfinance_data(data)
             else:
                 data = yf.download(
                     symbol,
@@ -71,6 +103,9 @@ class StockstatsUtils:
                     auto_adjust=True,
                 )
                 data = data.reset_index()
+                # 清理下载数据中的无效行
+                data = _clean_yfinance_data(data)
+                # 保存清理后的数据
                 data.to_csv(data_file, index=False)
 
             df = wrap(data)

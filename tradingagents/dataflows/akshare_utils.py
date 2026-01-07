@@ -272,29 +272,50 @@ def get_china_market_news(curr_date: str = None) -> str:
     """
     获取中国财经市场新闻
 
+    优先使用 Tushare，失败时 fallback 到 akshare
+
     Args:
         curr_date: 当前日期（可选）
 
     Returns:
         str: 格式化的市场新闻
     """
+    # 优先尝试 Tushare
+    try:
+        from tradingagents.dataflows.tushare_utils import get_china_market_news_tushare
+        tushare_result = get_china_market_news_tushare(curr_date)
+        # 检查 Tushare 是否返回了有效内容（不仅仅是标题）
+        if tushare_result and "[数据获取失败]" not in tushare_result:
+            # 检查是否有实质性内容（不只是"暂不可用"的提示）
+            if "暂不可用" not in tushare_result and len(tushare_result) > 200:
+                return tushare_result
+    except Exception as e:
+        pass  # Tushare 失败，使用 akshare fallback
+
+    # Akshare fallback
     try:
         result_parts = []
-        result_parts.append("# 中国财经市场新闻\n")
+        result_parts.append("# 中国财经市场新闻 (akshare)\n")
 
-        # 获取财联社快讯
+        # 获取财联社快讯（使用 stock_info_global_cls 替代已废弃的 stock_zh_a_alerts_cls）
         try:
-            df_cls = ak.stock_zh_a_alerts_cls()
+            df_cls = ak.stock_info_global_cls()
             if df_cls is not None and not df_cls.empty:
                 result_parts.append("## 财联社快讯（最新20条）\n")
                 df_recent = df_cls.head(20)
 
                 for idx, row in df_recent.iterrows():
                     title = row.get('标题', '')
-                    content = row.get('内容', '')[:300] if len(str(row.get('内容', ''))) > 300 else row.get('内容', '')
-                    pub_time = row.get('发布时间', row.get('时间', ''))
+                    content = row.get('内容', '')
+                    # 截断过长内容
+                    if len(str(content)) > 300:
+                        content = content[:300] + '...'
+                    pub_date = row.get('发布日期', '')
+                    pub_time = row.get('发布时间', '')
+                    time_str = f"{pub_date} {pub_time}" if pub_date else pub_time
 
-                    result_parts.append(f"**[{pub_time}]** {title}")
+                    if title:
+                        result_parts.append(f"**[{time_str}]** {title}")
                     if content:
                         result_parts.append(f"  {content}")
                     result_parts.append("")
@@ -471,28 +492,9 @@ def get_china_money_flow(stock_code: str) -> str:
 # 工具函数
 # ============================================================================
 
-def is_china_stock(ticker: str) -> bool:
-    """
-    判断是否为中国A股股票代码
-
-    Args:
-        ticker: 股票代码
-
-    Returns:
-        bool: True 如果是中国A股代码
-    """
-    if not ticker:
-        return False
-    # 移除可能的后缀（如 .SS, .SZ）
-    clean_ticker = ticker.split('.')[0]
-    # 判断是否为6位数字
-    if clean_ticker.isdigit() and len(clean_ticker) == 6:
-        # 深圳：000xxx, 002xxx, 003xxx, 300xxx
-        # 上海：600xxx, 601xxx, 603xxx, 605xxx, 688xxx
-        prefix = clean_ticker[:3]
-        if prefix in ['000', '002', '003', '300', '600', '601', '603', '605', '688']:
-            return True
-    return False
+# is_china_stock 函数已移至 tradingagents.agents.utils.agent_utils
+# 为保持向后兼容，此处重新导出
+from tradingagents.agents.utils.agent_utils import is_china_stock
 
 
 if __name__ == "__main__":
