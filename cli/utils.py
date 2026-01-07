@@ -230,13 +230,11 @@ def select_thinking_agent(provider) -> str:
             ("Qwen-Max-LongContext - 超长上下文", "qwen-max-longcontext"),
         ],
         "openai": [
-            ("GPT-4.1 nano - 最快最便宜 (1M上下文)", "gpt-4.1-nano"),
-            ("GPT-4.1 mini - 快速高效 (1M上下文)", "gpt-4.1-mini"),
-            ("GPT-4.1 - 最智能非推理模型 (1M上下文)", "gpt-4.1"),
-            ("GPT-4o mini - 经济实惠", "gpt-4o-mini"),
-            ("GPT-4o - 旗舰多模态模型", "gpt-4o"),
-            ("o4-mini - 快速推理模型", "o4-mini"),
-            ("o3 - 高级推理模型", "o3"),
+            ("GPT-5 nano - 高吞吐量，简单任务", "gpt-5-nano"),
+            ("GPT-5 mini - 成本优化的推理和对话", "gpt-5-mini"),
+            ("GPT-5.2 - 最佳通用模型 (推荐)", "gpt-5.2"),
+            ("GPT-5.2 Pro - 更难问题，深度思考", "gpt-5.2-pro"),
+            ("GPT-5.1 Codex Max - 编码专用", "gpt-5.1-codex-max"),
         ],
         "anthropic": [
             ("Claude 3.5 Haiku - 快速推理", "claude-3-5-haiku-latest"),

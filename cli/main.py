@@ -1,5 +1,6 @@
 from typing import Optional
 import datetime
+import json
 import typer
 from pathlib import Path
 from functools import wraps
@@ -22,8 +23,16 @@ from rich.rule import Rule
 
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.dataflows.logging_config import init_logging
+
+# 初始化日志系统
+init_logging(log_level="INFO", enable_console=False, enable_file=True)
 from cli.models import AnalystType
 from cli.utils import *
+from cli.analytics import AnalyticsTracker
+from cli.data_logger import ToolDataLogger
+from cli.decision_tracker import DecisionTracker, parse_decision_from_report, get_price_from_report
+from langchain_core.messages import ToolMessage
 
 console = Console()
 
@@ -39,6 +48,7 @@ class MessageBuffer:
     def __init__(self, max_length=100):
         self.messages = deque(maxlen=max_length)
         self.tool_calls = deque(maxlen=max_length)
+        self.detailed_log = []  # Complete detailed log for saving
         self.current_report = None
         self.final_report = None  # Store the complete final report
         self.agent_status = {
@@ -57,8 +67,8 @@ class MessageBuffer:
             "Risky Analyst": "pending",
             "Neutral Analyst": "pending",
             "Safe Analyst": "pending",
-            # Portfolio Management Team
-            "Portfolio Manager": "pending",
+            # Final Report
+            "Consolidation Report": "pending",
         }
         self.current_agent = None
         self.report_sections = {
@@ -71,19 +81,54 @@ class MessageBuffer:
             "final_trade_decision": None,
             "consolidation_report": None,
         }
+        # Analytics tracker for metrics
+        self.tracker = AnalyticsTracker()
 
     def add_message(self, message_type, content):
-        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
         self.messages.append((timestamp, message_type, content))
 
+        # Add to detailed log
+        log_entry = {
+            "timestamp": timestamp,
+            "type": message_type,
+            "content": str(content)[:500] if content else "",
+            "agent": self.current_agent,
+        }
+        self.detailed_log.append(log_entry)
+
+        # Track LLM calls
+        if message_type == "Reasoning" and self.current_agent:
+            self.tracker.add_llm_call(self.current_agent)
+
     def add_tool_call(self, tool_name, args):
-        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
         self.tool_calls.append((timestamp, tool_name, args))
+
+        # Add to detailed log
+        log_entry = {
+            "timestamp": timestamp,
+            "type": "Tool",
+            "tool": tool_name,
+            "args": str(args)[:200] if args else "",
+            "agent": self.current_agent,
+        }
+        self.detailed_log.append(log_entry)
+
+        # Track tool calls
+        self.tracker.add_tool_call(self.current_agent)
 
     def update_agent_status(self, agent, status):
         if agent in self.agent_status:
+            old_status = self.agent_status[agent]
             self.agent_status[agent] = status
             self.current_agent = agent
+
+            # Track agent lifecycle
+            if status == "in_progress" and old_status == "pending":
+                self.tracker.start_agent(agent)
+            elif status == "completed" and old_status == "in_progress":
+                self.tracker.end_agent(agent)
 
     def update_report_section(self, section_name, content):
         if section_name in self.report_sections:
@@ -185,7 +230,7 @@ def create_layout():
         Layout(name="footer", size=3),
     )
     layout["main"].split_column(
-        Layout(name="upper", ratio=3), Layout(name="analysis", ratio=5)
+        Layout(name="upper", ratio=4), Layout(name="analysis", ratio=5)
     )
     layout["upper"].split_row(
         Layout(name="progress", ratio=2), Layout(name="messages", ratio=3)
@@ -231,10 +276,11 @@ def update_display(layout, spinner_text=None):
         "Research Team": ["Bull Researcher", "Bear Researcher", "Research Manager"],
         "Trading Team": ["Trader"],
         "Risk Management": ["Risky Analyst", "Neutral Analyst", "Safe Analyst"],
-        "Portfolio Management": ["Portfolio Manager"],
+        "Final Report": ["Consolidation Report"],
     }
 
-    for team, agents in teams.items():
+    team_list = list(teams.items())
+    for idx, (team, agents) in enumerate(team_list):
         # Add first agent with team name
         first_agent = agents[0]
         status = message_buffer.agent_status[first_agent]
@@ -269,8 +315,9 @@ def update_display(layout, spinner_text=None):
                 status_cell = f"[{status_color}]{status}[/{status_color}]"
             progress_table.add_row("", agent, status_cell)
 
-        # Add horizontal line after each team
-        progress_table.add_row("─" * 20, "─" * 20, "─" * 20, style="dim")
+        # Add horizontal line after each team (except the last one)
+        if idx < len(team_list) - 1:
+            progress_table.add_row("─" * 20, "─" * 20, "─" * 20, style="dim")
 
     layout["progress"].update(
         Panel(progress_table, title="Progress", border_style="cyan", padding=(1, 2))
@@ -320,7 +367,7 @@ def update_display(layout, spinner_text=None):
             content_str = ' '.join(text_parts)
         elif not isinstance(content_str, str):
             content_str = str(content)
-            
+
         # Truncate message content if too long
         if len(content_str) > 200:
             content_str = content_str[:197] + "..."
@@ -380,7 +427,8 @@ def update_display(layout, spinner_text=None):
             )
         )
 
-    # Footer with statistics
+    # Footer with enhanced statistics
+    tracker = message_buffer.tracker
     tool_calls_count = len(message_buffer.tool_calls)
     llm_calls_count = sum(
         1 for _, msg_type, _ in message_buffer.messages if msg_type == "Reasoning"
@@ -389,13 +437,28 @@ def update_display(layout, spinner_text=None):
         1 for content in message_buffer.report_sections.values() if content is not None
     )
 
-    stats_table = Table(show_header=False, box=None, padding=(0, 2), expand=True)
-    stats_table.add_column("Stats", justify="center")
-    stats_table.add_row(
-        f"Tool Calls: {tool_calls_count} | LLM Calls: {llm_calls_count} | Generated Reports: {reports_count}"
-    )
+    stats_table = Table(show_header=False, box=None, padding=(0, 1), expand=True)
+    stats_table.add_column("Stats", justify="center", ratio=1)
 
-    layout["footer"].update(Panel(stats_table, border_style="grey50"))
+    # Row 1: Time, Tools, LLM calls, Reports
+    row1 = f"[cyan]{tracker.elapsed_str}[/cyan] | "
+    row1 += f"Tools: {tool_calls_count} | "
+    row1 += f"LLM: {llm_calls_count} | "
+    row1 += f"Reports: {reports_count}/8"
+    stats_table.add_row(row1)
+
+    # Row 2: Token and cost info (if available)
+    if tracker.total_input_tokens > 0 or tracker.total_output_tokens > 0:
+        row2 = f"[green]In: {tracker.total_input_tokens:,}[/green] | "
+        row2 += f"[yellow]Out: {tracker.total_output_tokens:,}[/yellow] | "
+        row2 += f"[magenta]Cost: {tracker.cost_str}[/magenta]"
+        stats_table.add_row(row2)
+
+    # Row 3: Error indicator (if any)
+    if tracker.errors:
+        stats_table.add_row(f"[red]{len(tracker.errors)} error(s)[/red]")
+
+    layout["footer"].update(Panel(stats_table, border_style="grey50", title="Statistics"))
 
 
 def get_user_selections():
@@ -761,7 +824,13 @@ def extract_content_string(content):
     else:
         return str(content)
 
-def run_analysis():
+def run_analysis(verbose: bool = False, save_log: bool = False):
+    """Run stock analysis with TradingAgents.
+
+    Args:
+        verbose: Enable verbose output with more details
+        save_log: Save detailed JSON log to results folder
+    """
     # First get all user selections
     selections = get_user_selections()
 
@@ -773,6 +842,9 @@ def run_analysis():
     config["deep_think_llm"] = selections["deep_thinker"]
     config["backend_url"] = selections["backend_url"]
     config["llm_provider"] = selections["llm_provider"].lower()
+
+    # Set model in tracker for cost estimation
+    message_buffer.tracker.set_model(selections["deep_thinker"])
 
     # Initialize the graph
     graph = TradingAgentsGraph(
@@ -786,6 +858,13 @@ def run_analysis():
     report_dir.mkdir(parents=True, exist_ok=True)
     log_file = results_dir / "message_tool.log"
     log_file.touch(exist_ok=True)
+
+    # 初始化工具数据记录器（CSV输出）
+    tool_data_csv = results_dir / "tool_data.csv"
+    data_logger = ToolDataLogger(tool_data_csv, selections['ticker'])
+
+    # 初始化决策追踪器（用于反思闭环）
+    decision_tracker = DecisionTracker(Path(config["results_dir"]))
 
     def save_message_decorator(obj, func_name):
         func = getattr(obj, func_name)
@@ -865,40 +944,123 @@ def run_analysis():
         )
         update_display(layout, spinner_text)
 
+        # 生成上次决策反思报告（如果存在上次决策）
+        reflection_report = ""
+        prev_decision = decision_tracker.get_previous_decision(selections["ticker"])
+        if prev_decision:
+            message_buffer.add_message(
+                "System",
+                f"发现上次分析记录 ({prev_decision['date']}): {prev_decision['decision']}"
+            )
+            update_display(layout)
+
+            # 获取当前价格（使用行情数据）
+            try:
+                from tradingagents.dataflows.tushare_utils import get_stock_data
+                price_data = get_stock_data(selections["ticker"], days=30)
+                current_price = None
+                price_history = []
+
+                # 解析价格数据
+                if price_data and "当前价格" in price_data:
+                    import re
+                    price_match = re.search(r'当前价格[：:]\s*([\d.]+)', price_data)
+                    if price_match:
+                        current_price = float(price_match.group(1))
+
+                if current_price:
+                    reflection_report = decision_tracker.generate_reflection_report(
+                        selections["ticker"],
+                        selections["analysis_date"],
+                        current_price,
+                        price_history
+                    )
+                    if reflection_report:
+                        message_buffer.add_message(
+                            "System",
+                            f"已生成上次决策反思报告"
+                        )
+                        # 保存反思报告
+                        with open(report_dir / "reflection_report.md", "w", encoding="utf-8") as f:
+                            f.write(reflection_report)
+            except Exception as e:
+                message_buffer.add_message("System", f"获取价格数据失败: {str(e)[:50]}")
+
+            update_display(layout)
+
         # Initialize state and get graph args
         init_agent_state = graph.propagator.create_initial_state(
             selections["ticker"], selections["analysis_date"]
         )
+        # 注入反思报告到初始状态
+        if reflection_report:
+            init_agent_state["previous_decision_reflection"] = reflection_report
+        else:
+            init_agent_state["previous_decision_reflection"] = ""
+
         args = graph.propagator.get_graph_args()
 
         # Stream the analysis
         trace = []
         for chunk in graph.graph.stream(init_agent_state, **args):
-            if len(chunk["messages"]) > 0:
-                # Get the last message from the chunk
-                last_message = chunk["messages"][-1]
+            # 处理有消息的 chunk（大多数节点）
+            has_messages = "messages" in chunk and len(chunk["messages"]) > 0
 
-                # Extract message content and type
-                if hasattr(last_message, "content"):
-                    content = extract_content_string(last_message.content)  # Use the helper function
-                    msg_type = "Reasoning"
-                else:
-                    content = str(last_message)
-                    msg_type = "System"
+            # 也要处理没有消息但有 consolidation_report 的 chunk
+            has_consolidation = "consolidation_report" in chunk and chunk["consolidation_report"]
 
-                # Add message to buffer
-                message_buffer.add_message(msg_type, content)                
+            if has_messages or has_consolidation:
+                # 遍历所有消息以捕获工具调用和结果（用于CSV记录）
+                messages = chunk.get("messages", [])
+                for message in messages:
+                    # 检测工具调用（AIMessage with tool_calls）
+                    if hasattr(message, "tool_calls") and message.tool_calls:
+                        for tool_call in message.tool_calls:
+                            if isinstance(tool_call, dict):
+                                tool_call_id = tool_call.get("id", "")
+                                tool_name = tool_call["name"]
+                                tool_args = tool_call["args"]
+                            else:
+                                tool_call_id = getattr(tool_call, "id", "")
+                                tool_name = tool_call.name
+                                tool_args = tool_call.args
+                            # 注册工具调用到数据记录器
+                            data_logger.register_tool_call(tool_call_id, tool_name, tool_args)
 
-                # If it's a tool call, add it to tool calls
-                if hasattr(last_message, "tool_calls"):
-                    for tool_call in last_message.tool_calls:
-                        # Handle both dictionary and object tool calls
-                        if isinstance(tool_call, dict):
-                            message_buffer.add_tool_call(
-                                tool_call["name"], tool_call["args"]
-                            )
-                        else:
-                            message_buffer.add_tool_call(tool_call.name, tool_call.args)
+                    # 检测工具结果（ToolMessage）
+                    if isinstance(message, ToolMessage):
+                        tool_call_id = message.tool_call_id
+                        result_content = extract_content_string(message.content)
+                        data_logger.log_tool_result(tool_call_id, result_content)
+
+                # Get the last message from the chunk (用于UI显示)
+                # 注意：有些节点（如 Consolidation Report）可能没有返回 messages
+                if messages:
+                    last_message = messages[-1]
+
+                    # Extract message content and type
+                    if hasattr(last_message, "content"):
+                        content = extract_content_string(last_message.content)  # Use the helper function
+                        msg_type = "Reasoning"
+                    else:
+                        content = str(last_message)
+                        msg_type = "System"
+
+                    # Add message to buffer
+                    message_buffer.add_message(msg_type, content)
+
+                    # If it's a tool call, add it to tool calls (用于UI显示)
+                    if hasattr(last_message, "tool_calls"):
+                        for tool_call in last_message.tool_calls:
+                            # Handle both dictionary and object tool calls
+                            if isinstance(tool_call, dict):
+                                tool_name = tool_call["name"]
+                                tool_args = tool_call["args"]
+                                message_buffer.add_tool_call(tool_name, tool_args)
+                            else:
+                                tool_name = tool_call.name
+                                tool_args = tool_call.args
+                                message_buffer.add_tool_call(tool_name, tool_args)
 
                 # Update reports and agent status based on chunk content
                 # Analyst Team Reports
@@ -1094,8 +1256,9 @@ def run_analysis():
                         message_buffer.update_agent_status(
                             "Neutral Analyst", "completed"
                         )
+                        # Set Consolidation Report to in_progress
                         message_buffer.update_agent_status(
-                            "Portfolio Manager", "completed"
+                            "Consolidation Report", "in_progress"
                         )
 
                 # Consolidation Report (A-share only)
@@ -1105,6 +1268,9 @@ def run_analysis():
                     )
                     message_buffer.add_message(
                         "Reasoning", "Consolidation Report generated"
+                    )
+                    message_buffer.update_agent_status(
+                        "Consolidation Report", "completed"
                     )
 
                 # Update the display
@@ -1134,10 +1300,127 @@ def run_analysis():
 
         update_display(layout)
 
+    # After Live context ends, display summary and save log
+    display_analysis_summary(message_buffer.tracker, selections, results_dir)
+
+    # Save detailed JSON log if requested
+    if save_log:
+        log_path = results_dir / "detailed_log.json"
+        log_data = {
+            "summary": message_buffer.tracker.get_summary(),
+            "selections": {
+                "ticker": selections["ticker"],
+                "analysis_date": selections["analysis_date"],
+                "llm_provider": selections["llm_provider"],
+                "model": selections["deep_thinker"],
+                "research_depth": selections["research_depth"],
+            },
+            "detailed_log": message_buffer.detailed_log,
+        }
+        with open(log_path, "w", encoding="utf-8") as f:
+            json.dump(log_data, f, ensure_ascii=False, indent=2)
+        console.print(f"[green]✅ Detailed log saved to: {log_path}[/green]")
+
+    # 输出工具数据CSV摘要
+    csv_summary = data_logger.get_summary()
+    if csv_summary['total'] > 0:
+        console.print(f"[green]✅ Tool data CSV saved to: {tool_data_csv}[/green]")
+        console.print(f"   Records: {csv_summary['total']}, Categories: {', '.join(csv_summary['categories'].keys())}")
+
+    # 保存本次决策（用于下次分析的反思）
+    try:
+        final_trade_report = message_buffer.report_sections.get("final_trade_decision", "")
+        consolidation_report = message_buffer.report_sections.get("consolidation_report", "")
+
+        # 从报告中解析决策信息
+        report_to_parse = consolidation_report or final_trade_report
+        if report_to_parse:
+            decision_info = parse_decision_from_report(report_to_parse)
+            current_price = get_price_from_report(report_to_parse)
+
+            if current_price:
+                decision_tracker.save_decision(
+                    ticker=selections["ticker"],
+                    analysis_date=selections["analysis_date"],
+                    decision=decision_info["decision"],
+                    price=current_price,
+                    confidence=decision_info["confidence"],
+                    key_reasons=decision_info["reasons"],
+                    full_report=report_to_parse
+                )
+                console.print(f"[green]✅ 决策已保存: {decision_info['decision']} @ {current_price:.2f}[/green]")
+    except Exception as e:
+        console.print(f"[yellow]⚠️ 保存决策时出错: {str(e)[:50]}[/yellow]")
+
+
+def display_analysis_summary(tracker: AnalyticsTracker, selections: dict, results_dir: Path):
+    """显示分析完成摘要"""
+    console.print("\n")
+
+    # Main summary table
+    summary_table = Table(
+        title="📊 Analysis Summary",
+        box=box.ROUNDED,
+        show_header=True,
+        header_style="bold cyan",
+    )
+    summary_table.add_column("Metric", style="cyan")
+    summary_table.add_column("Value", style="green")
+
+    summary_table.add_row("Ticker", selections["ticker"])
+    summary_table.add_row("Analysis Date", selections["analysis_date"])
+    summary_table.add_row("Total Time", tracker.elapsed_str)
+    summary_table.add_row("LLM Provider", selections["llm_provider"])
+    summary_table.add_row("Model", selections["deep_thinker"])
+    summary_table.add_row("Total LLM Calls", str(tracker.total_llm_calls))
+    summary_table.add_row("Total Tool Calls", str(tracker.total_tool_calls))
+
+    if tracker.total_input_tokens > 0:
+        summary_table.add_row("Input Tokens", f"{tracker.total_input_tokens:,}")
+        summary_table.add_row("Output Tokens", f"{tracker.total_output_tokens:,}")
+        summary_table.add_row("Estimated Cost", tracker.cost_str)
+
+    if tracker.errors:
+        summary_table.add_row("Errors", f"[red]{len(tracker.errors)}[/red]")
+
+    summary_table.add_row("Results Dir", str(results_dir))
+
+    console.print(summary_table)
+
+    # Agent execution time table
+    if tracker.agents:
+        agent_table = Table(
+            title="⏱ Agent Execution Time",
+            box=box.SIMPLE,
+            show_header=True,
+            header_style="bold yellow",
+        )
+        agent_table.add_column("Agent", style="cyan")
+        agent_table.add_column("Duration", style="green", justify="right")
+        agent_table.add_column("Tools", style="yellow", justify="center")
+        agent_table.add_column("LLM Calls", style="magenta", justify="center")
+
+        for name, metrics in tracker.agents.items():
+            if metrics.end_time:  # Only show completed agents
+                agent_table.add_row(
+                    name,
+                    metrics.duration_str,
+                    str(metrics.tool_calls),
+                    str(metrics.llm_calls),
+                )
+
+        console.print(agent_table)
+
+    console.print("\n")
+
 
 @app.command()
-def analyze():
-    run_analysis()
+def analyze(
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose output with more details"),
+    save_log: bool = typer.Option(False, "--save-log", "-l", help="Save detailed JSON log to results folder"),
+):
+    """Run stock analysis with TradingAgents multi-agent system."""
+    run_analysis(verbose=verbose, save_log=save_log)
 
 
 if __name__ == "__main__":
