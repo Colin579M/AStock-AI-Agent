@@ -15,6 +15,35 @@ from tradingagents.default_config import DEFAULT_CONFIG
 from langchain_core.messages import HumanMessage
 
 
+def is_china_stock(ticker: str) -> bool:
+    """
+    判断是否为中国A股股票代码
+
+    支持的代码格式:
+    - 上海: 600xxx, 601xxx, 603xxx, 605xxx, 688xxx (科创板)
+    - 深圳: 000xxx, 002xxx, 003xxx, 300xxx, 301xxx (创业板)
+    - 北交所: 8xxxxx, 4xxxxx (暂不支持)
+
+    Args:
+        ticker: 股票代码，支持带后缀格式如 600036.SH
+    Returns:
+        bool: True 如果是中国A股代码
+    """
+    if not ticker:
+        return False
+    # 移除可能的后缀（如 .SS, .SZ, .SH）
+    clean_ticker = ticker.split('.')[0].strip()
+    # 判断是否为6位数字
+    if clean_ticker.isdigit() and len(clean_ticker) == 6:
+        # 深圳：000xxx, 002xxx, 003xxx, 300xxx, 301xxx (创业板2020年后新发)
+        # 上海：600xxx, 601xxx, 603xxx, 605xxx, 688xxx
+        prefix = clean_ticker[:3]
+        valid_prefixes = ['000', '002', '003', '300', '301', '600', '601', '603', '605', '688']
+        if prefix in valid_prefixes:
+            return True
+    return False
+
+
 def create_msg_delete():
     def delete_messages(state):
         """Clear messages and add placeholder for Anthropic compatibility"""
@@ -692,10 +721,16 @@ class Toolkit:
     @tool
     def get_tushare_hsgt_flow() -> str:
         """
-        使用Tushare获取沪深港通资金流向（北向资金），包括沪股通、深股通每日净买入。
-        北向资金是外资态度的重要风向标，对A股市场有重要影响。
+        ⚠️ 已停更：2024年8月19日起沪深交所调整信息披露机制，北向资金整体流向数据已停止更新。
+
+        请改用以下替代工具：
+        - get_tushare_hsgt_top10: 获取每日北向资金十大成交股
+        - get_tushare_top10_holders: 通过"香港中央结算"持股比例季度变化判断外资态度
+
+        注：个股北向持股明细(hk_hold)港交所自2024年8月20日起仅提供季度数据，已移除。
+
         Returns:
-            str: 格式化的北向资金流向数据，包含近10日流向及趋势分析
+            str: 数据停更说明
         """
         from tradingagents.dataflows.tushare_utils import get_hsgt_flow
         return get_hsgt_flow()
@@ -727,6 +762,40 @@ class Toolkit:
         """
         from tradingagents.dataflows.tushare_utils import get_pmi
         return get_pmi()
+
+    @staticmethod
+    @tool
+    def get_tushare_cctv_news(
+        date: Annotated[str, "日期，格式 YYYYMMDD 或 YYYY-MM-DD，默认今天"] = None,
+    ) -> str:
+        """
+        使用Tushare获取新闻联播文字稿，筛选经济相关内容。
+        新闻联播是重要的政策风向标，关注经济、金融、产业相关内容有助于把握政策方向。
+        Args:
+            date (str): 日期，格式 YYYYMMDD 或 YYYY-MM-DD，默认今天
+        Returns:
+            str: 格式化的新闻联播经济要点
+        """
+        from tradingagents.dataflows.tushare_utils import get_cctv_news
+        if date:
+            date = date.replace("-", "")
+        return get_cctv_news(date)
+
+    @staticmethod
+    @tool
+    def get_tushare_market_news(
+        date: Annotated[str, "日期，格式 YYYYMMDD 或 YYYY-MM-DD，默认今天"] = None,
+    ) -> str:
+        """
+        使用Tushare获取中国财经市场新闻，整合新闻联播和重大新闻。
+        提供宏观经济和市场层面的新闻信息，帮助理解市场环境。
+        Args:
+            date (str): 日期，格式 YYYYMMDD 或 YYYY-MM-DD，默认今天
+        Returns:
+            str: 格式化的市场新闻汇总
+        """
+        from tradingagents.dataflows.tushare_utils import get_china_market_news_tushare
+        return get_china_market_news_tushare(date)
 
     @staticmethod
     @tool
@@ -807,3 +876,202 @@ class Toolkit:
         """
         from tradingagents.dataflows.tushare_utils import get_china_stock_sentiment
         return get_china_stock_sentiment(stock_code)
+
+    # ========================================================================
+    # 中国A股 Tushare Pro 扩展数据工具（Phase 1.2 新增）
+    # ========================================================================
+
+    # ============= 已废弃工具说明 =============
+    # get_tushare_hk_hold() 工具已移除
+    # 废弃原因：港交所自2024年8月20日起停止披露北向资金每日数据
+    # hk_hold API 目前仅返回季度数据，无法用于短期交易分析
+    # 替代方案：使用 get_tushare_top10_holders() 查看"香港中央结算"持股比例
+    # ==========================================
+
+    @staticmethod
+    @tool
+    def get_tushare_hsgt_top10(
+        trade_date: Annotated[str, "交易日期 YYYYMMDD 格式，可选"] = "",
+    ) -> str:
+        """
+        使用Tushare获取沪深港通十大成交股，查看当日北向资金重点交易的股票。
+        用于判断某只股票是否进入外资关注的热门标的。
+        Args:
+            trade_date (str): 交易日期 YYYYMMDD 格式，留空获取最近交易日数据
+        Returns:
+            str: 格式化的沪深港通十大成交股列表
+        """
+        from tradingagents.dataflows.tushare_utils import get_hsgt_top10
+        return get_hsgt_top10(trade_date if trade_date else None)
+
+    @staticmethod
+    @tool
+    def get_tushare_block_trade(
+        stock_code: Annotated[str, "股票代码，如 601899, 000001"],
+        days: Annotated[int, "获取天数，默认30天"] = 30,
+    ) -> str:
+        """
+        使用Tushare获取大宗交易数据，包括成交价、成交量、买卖营业部。
+        大宗交易频繁且折价较大可能是减持信号，需关注交易背后的动机。
+        Args:
+            stock_code (str): 股票代码，如 601899（紫金矿业）
+            days (int): 获取天数，默认30天
+        Returns:
+            str: 格式化的大宗交易记录及风险分析
+        """
+        from tradingagents.dataflows.tushare_utils import get_block_trade
+        return get_block_trade(stock_code, days)
+
+    @staticmethod
+    @tool
+    def get_tushare_pledge_stat(
+        stock_code: Annotated[str, "股票代码，如 601899, 000001"],
+    ) -> str:
+        """
+        使用Tushare获取股权质押统计，包括质押比例、质押次数、质押股份。
+        质押比例超过30%需重点关注，超过50%存在平仓风险。
+        Args:
+            stock_code (str): 股票代码，如 601899（紫金矿业）
+        Returns:
+            str: 格式化的股权质押数据及风险评估
+        """
+        from tradingagents.dataflows.tushare_utils import get_pledge_stat
+        return get_pledge_stat(stock_code)
+
+    @staticmethod
+    @tool
+    def get_tushare_share_float(
+        stock_code: Annotated[str, "股票代码，如 601899, 000001"],
+    ) -> str:
+        """
+        使用Tushare获取限售解禁日历，包括未来6个月的解禁时点、解禁数量、解禁股东。
+        大规模解禁可能对股价形成压力，需提前关注解禁时点和解禁股东成本。
+        Args:
+            stock_code (str): 股票代码，如 601899（紫金矿业）
+        Returns:
+            str: 格式化的解禁日历及风险提示
+        """
+        from tradingagents.dataflows.tushare_utils import get_share_float
+        return get_share_float(stock_code)
+
+    @staticmethod
+    @tool
+    def get_tushare_index_daily(
+        index_code: Annotated[str, "指数代码，如 000300.SH（沪深300）, 399318.SZ（国证有色）"],
+        days: Annotated[int, "获取天数，默认60天"] = 60,
+    ) -> str:
+        """
+        使用Tushare获取指数日线行情，用于分析板块走势和个股相对强弱。
+        常用指数: 000300.SH沪深300, 399006.SZ创业板指, 399318.SZ国证有色, 000001.SH上证指数
+        Args:
+            index_code (str): 指数代码，如 399318.SZ（国证有色）
+            days (int): 获取天数，默认60天
+        Returns:
+            str: 格式化的指数行情数据及趋势分析
+        """
+        from tradingagents.dataflows.tushare_utils import get_index_daily
+        return get_index_daily(index_code, days)
+
+    @staticmethod
+    @tool
+    def get_tushare_index_member(
+        index_code: Annotated[str, "指数代码，默认 399318.SZ（国证有色）"] = "399318.SZ",
+    ) -> str:
+        """
+        使用Tushare获取指数成分股列表，用于板块联动分析和同行业对比。
+        常用指数: 399318.SZ国证有色, 000300.SH沪深300, 399006.SZ创业板指
+        Args:
+            index_code (str): 指数代码，默认为国证有色 399318.SZ
+        Returns:
+            str: 格式化的指数成分股列表
+        """
+        from tradingagents.dataflows.tushare_utils import get_index_member
+        return get_index_member(index_code)
+
+    @staticmethod
+    @tool
+    def get_tushare_stk_surv(
+        stock_code: Annotated[str, "股票代码，如 601899, 000001"],
+    ) -> str:
+        """
+        使用Tushare获取机构调研数据，包括调研日期、参与机构数量、调研形式。
+        调研密度反映机构关注度，频繁调研通常意味着机构对公司有浓厚兴趣。
+        Args:
+            stock_code (str): 股票代码，如 601899（紫金矿业）
+        Returns:
+            str: 格式化的机构调研记录及关注度分析
+        """
+        from tradingagents.dataflows.tushare_utils import get_stk_surv
+        return get_stk_surv(stock_code)
+
+    @staticmethod
+    @tool
+    def get_tushare_report_rc(
+        stock_code: Annotated[str, "股票代码，如 601899, 000001"],
+        days: Annotated[int, "获取天数，默认30天"] = 30,
+    ) -> str:
+        """
+        使用Tushare获取券商研报数据，包括研报标题、评级、目标价、发布机构。
+        券商研报反映机构一致预期，目标价可作为估值参考。
+        Args:
+            stock_code (str): 股票代码，如 601899（紫金矿业）
+            days (int): 获取天数，默认30天
+        Returns:
+            str: 格式化的券商研报数据及评级统计
+        """
+        from tradingagents.dataflows.tushare_utils import get_report_rc
+        return get_report_rc(stock_code, days)
+
+    @staticmethod
+    @tool
+    def get_tushare_fut_daily(
+        fut_code: Annotated[str, "期货代码，如 CU.SHF（沪铜）, AU.SHF（沪金）"],
+        days: Annotated[int, "获取天数，默认60天"] = 60,
+    ) -> str:
+        """
+        使用Tushare获取期货日线数据，用于分析商品价格走势对周期股的影响。
+        常用期货: CU沪铜, AU沪金, AG沪银, AL沪铝, ZN沪锌, NI沪镍
+        Args:
+            fut_code (str): 期货代码，如 CU.SHF（沪铜）, AU.SHF（沪金）
+            days (int): 获取天数，默认60天
+        Returns:
+            str: 格式化的期货行情数据及趋势分析
+        """
+        from tradingagents.dataflows.tushare_utils import get_fut_daily
+        return get_fut_daily(fut_code, days)
+
+    # ========================================================================
+    # 中国A股 Tushare Pro 综合数据工具（Phase 1.2 新增）
+    # ========================================================================
+
+    @staticmethod
+    @tool
+    def get_tushare_capital_deep(
+        stock_code: Annotated[str, "股票代码，如 601899, 000001"],
+    ) -> str:
+        """
+        使用Tushare获取深度资金分析数据包，一次性返回北向持股、大宗交易、股权质押、解禁日历。
+        这是进行资金面深度分析的一站式数据源，适合评估资金风险和潜在供给压力。
+        Args:
+            stock_code (str): 股票代码，如 601899（紫金矿业）
+        Returns:
+            str: 格式化的深度资金分析报告
+        """
+        from tradingagents.dataflows.tushare_utils import get_china_stock_capital_deep
+        return get_china_stock_capital_deep(stock_code)
+
+    @staticmethod
+    @tool
+    def get_tushare_institution(
+        stock_code: Annotated[str, "股票代码，如 601899, 000001"],
+    ) -> str:
+        """
+        使用Tushare获取机构观点数据包，一次性返回机构调研和券商研报数据。
+        这是了解机构对公司看法的一站式数据源，适合判断机构共识和目标价预期。
+        Args:
+            stock_code (str): 股票代码，如 601899（紫金矿业）
+        Returns:
+            str: 格式化的机构观点综合报告
+        """
+        from tradingagents.dataflows.tushare_utils import get_china_stock_institution
+        return get_china_stock_institution(stock_code)

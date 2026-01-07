@@ -1,11 +1,16 @@
 from langchain_core.messages import AIMessage
 import time
 import json
+from tradingagents.agents.utils.state_utils import apply_invest_debate_limits
 
 
 def create_bull_researcher(llm, memory):
     def bull_node(state) -> dict:
         investment_debate_state = state["investment_debate_state"]
+
+        # 应用历史长度限制，防止context window溢出
+        investment_debate_state = apply_invest_debate_limits(investment_debate_state)
+
         history = investment_debate_state.get("history", "")
         bull_history = investment_debate_state.get("bull_history", "")
 
@@ -21,6 +26,16 @@ def create_bull_researcher(llm, memory):
         past_memory_str = ""
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
+
+        # 获取上次决策反思（如果有）
+        prev_decision_reflection = state.get("previous_decision_reflection", "")
+        reflection_context = ""
+        if prev_decision_reflection and "首次分析" not in prev_decision_reflection and "无历史决策" not in prev_decision_reflection:
+            reflection_context = f"""
+Previous decision reflection (IMPORTANT - learn from past mistakes/successes):
+{prev_decision_reflection}
+Consider this reflection when building your argument. If the previous decision was wrong, avoid similar mistakes. If it was right, reinforce similar reasoning.
+"""
 
         prompt = f"""You are a Bull Analyst advocating for investing in the stock. Your task is to build a strong, evidence-based case emphasizing growth potential, competitive advantages, and positive market indicators. Leverage the provided research and data to address concerns and counter bearish arguments effectively.
 
@@ -39,6 +54,7 @@ Company fundamentals report: {fundamentals_report}
 Conversation history of the debate: {history}
 Last bear argument: {current_response}
 Reflections from similar situations and lessons learned: {past_memory_str}
+{reflection_context}
 Use this information to deliver a compelling bull argument, refute the bear's concerns, and engage in a dynamic debate that demonstrates the strengths of the bull position. You must also address reflections and learn from lessons and mistakes you made in the past.
 """
 

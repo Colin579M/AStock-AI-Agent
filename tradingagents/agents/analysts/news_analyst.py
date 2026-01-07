@@ -1,28 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 import time
 import json
-
-
-def is_china_stock(ticker: str) -> bool:
-    """
-    判断是否为中国A股股票代码
-    Args:
-        ticker: 股票代码
-    Returns:
-        bool: True 如果是中国A股代码
-    """
-    if not ticker:
-        return False
-    # 移除可能的后缀（如 .SS, .SZ）
-    clean_ticker = ticker.split('.')[0]
-    # 判断是否为6位数字
-    if clean_ticker.isdigit() and len(clean_ticker) == 6:
-        # 深圳：000xxx, 002xxx, 003xxx, 300xxx
-        # 上海：600xxx, 601xxx, 603xxx, 605xxx, 688xxx
-        prefix = clean_ticker[:3]
-        if prefix in ['000', '002', '003', '300', '600', '601', '603', '605', '688']:
-            return True
-    return False
+from tradingagents.agents.utils.agent_utils import is_china_stock
 
 
 def create_news_analyst(llm, toolkit):
@@ -32,22 +11,24 @@ def create_news_analyst(llm, toolkit):
 
         # 根据市场类型选择工具
         if is_china_stock(ticker):
-            # 中国A股使用 akshare 新闻工具 + Tushare 宏观数据
+            # 中国A股使用 Tushare 新闻工具（优先）+ akshare 备用
             tools = [
-                toolkit.get_tushare_stock_basic,  # 首先获取股票基本信息（准确名称）
-                toolkit.get_china_stock_news,     # akshare 个股新闻
-                toolkit.get_china_market_news,    # akshare 市场新闻
-                toolkit.get_tushare_pmi,          # Tushare PMI 采购经理指数
-                toolkit.get_google_news,          # 备用，用于获取国际新闻
+                toolkit.get_tushare_stock_basic,   # 首先获取股票基本信息（准确名称）
+                toolkit.get_china_stock_news,      # akshare 个股新闻
+                toolkit.get_tushare_cctv_news,     # Tushare 新闻联播（政策风向）
+                toolkit.get_tushare_market_news,   # Tushare 市场新闻（整合新闻联播+重大新闻）
+                toolkit.get_tushare_pmi,           # Tushare PMI 采购经理指数
+                toolkit.get_google_news,           # 备用，用于获取国际新闻
             ]
             system_message = """您是一位专业的中国财经新闻分析师，负责收集和分析与目标股票相关的新闻资讯和宏观经济数据。
 
 【重要】数据获取顺序：
 1. **首先调用 get_tushare_stock_basic** 获取股票基本信息，确认股票的准确名称
-2. 调用 get_china_stock_news 获取个股相关新闻
-3. 调用 get_china_market_news 获取市场整体新闻和财联社快讯
-4. 调用 get_tushare_pmi 获取PMI采购经理指数（宏观经济先行指标）
-5. 如需要，调用 get_google_news 获取补充的国际财经新闻
+2. 调用 get_china_stock_news 获取个股相关新闻（akshare）
+3. 调用 get_tushare_cctv_news 获取新闻联播经济要点（政策风向标）
+4. 调用 get_tushare_market_news 获取市场整体新闻
+5. 调用 get_tushare_pmi 获取PMI采购经理指数（宏观经济先行指标）
+6. 如需要，调用 get_google_news 获取补充的国际财经新闻
 
 【股票代码格式】Tushare使用的格式：
 - 上海股票：股票代码.SH（如 601899.SH）
@@ -60,17 +41,43 @@ def create_news_analyst(llm, toolkit):
   - PMI指数分析（>50表示扩张，<50表示收缩）
   - 制造业PMI vs 非制造业PMI
   - PMI趋势对行业的影响
+- **新闻联播解读**: 关注经济、产业、改革相关内容，判断政策导向
 - **市场情绪**: 从新闻角度判断市场情绪是乐观还是悲观
 - **风险提示**: 识别新闻中的潜在风险信号
 
 中国财经新闻特色：
 - 关注政策导向（如产业政策、行业监管）
-- 注意官方媒体（新华社、央视）的重要表态
+- 注意官方媒体（新华社、央视新闻联播）的重要表态
 - 财联社快讯的时效性和市场敏感度
 - 龙头公司动态对板块的带动作用
 - PMI数据对周期性行业的指导意义
 
-请撰写详细的中文新闻分析报告，在报告标题中使用从 get_tushare_stock_basic 获取的准确股票名称，总结近期重要新闻及其对投资决策的影响，并在报告末尾附上Markdown表格总结关键新闻要点。"""
+请撰写详细的中文新闻分析报告，在报告标题中使用从 get_tushare_stock_basic 获取的准确股票名称，总结近期重要新闻及其对投资决策的影响。
+
+报告必须包含以下内容：
+1. 公司层面新闻（重大公告、业绩相关）
+2. 行业层面新闻（政策变化、竞争格局）
+3. 宏观经济新闻（PMI解读、政策导向、新闻联播要点）
+
+报告末尾附上Markdown表格总结关键新闻要点：
+| 新闻类型 | 关键内容 | 影响判断 | 时效性 |
+|---------|---------|---------|--------|
+| 公司新闻 | ... | 利好/利空/中性 | 短期/中期/长期 |
+| 行业政策 | ... | 利好/利空/中性 | 短期/中期/长期 |
+| 宏观数据 | ... | 利好/利空/中性 | 短期/中期/长期 |
+| 新闻联播 | ... | 利好/利空/中性 | 短期/中期/长期 |
+
+【数据缺失处理】
+如果某些数据无法获取，请按以下方式处理：
+1. **公司新闻**：如无法获取，使用Google News补充搜索
+2. **PMI数据**：如无法获取最新数据，使用上月数据并注明
+3. **新闻联播**：如无法获取，跳过该部分并注明
+4. **行业新闻**：如无法获取，跳过该部分并注明
+
+置信度评估（在报告末尾标注）：
+- 高置信度：公司新闻+行业新闻+宏观数据+新闻联播齐全
+- 中置信度：仅有公司新闻或市场新闻
+- 低置信度：新闻数据严重缺失"""
         elif toolkit.config["online_tools"]:
             tools = [toolkit.get_global_news_openai, toolkit.get_google_news]
             system_message = (
