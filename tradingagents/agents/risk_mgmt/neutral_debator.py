@@ -1,10 +1,22 @@
 import time
 import json
+from tradingagents.agents.utils.state_utils import apply_risk_debate_limits
 
 
 def create_neutral_debator(llm):
+    """
+    创建风控官(Risk_Manager)节点
+
+    角色定位：专注于风险识别、仓位管理和杠杆监控
+    核心关注：尾部风险、资金结构变化、潜在供给压力
+    数据引用：质押数据、解禁日历、大宗交易、融资余额
+    """
     def neutral_node(state) -> dict:
         risk_debate_state = state["risk_debate_state"]
+
+        # 应用历史长度限制，防止context window溢出
+        risk_debate_state = apply_risk_debate_limits(risk_debate_state)
+
         history = risk_debate_state.get("history", "")
         neutral_history = risk_debate_state.get("neutral_history", "")
 
@@ -18,30 +30,100 @@ def create_neutral_debator(llm):
 
         trader_decision = state["trader_investment_plan"]
 
-        prompt = f"""As the Neutral Risk Analyst, your role is to provide a balanced perspective, weighing both the potential benefits and risks of the trader's decision or plan. You prioritize a well-rounded approach, evaluating the upsides and downsides while factoring in broader market trends, potential economic shifts, and diversification strategies.Here is the trader's decision:
+        # 获取上次决策反思（如果有）
+        prev_decision_reflection = state.get("previous_decision_reflection", "")
+        reflection_context = ""
+        if prev_decision_reflection and "首次分析" not in prev_decision_reflection and "无历史决策" not in prev_decision_reflection:
+            reflection_context = f"""
+【历史决策反思】（重要参考）
+{prev_decision_reflection}
+请根据上述反思调整您的风控策略。如果之前的止损位设置不当，本次需校准；如果仓位建议合理，可沿用类似思路。
+"""
 
+        prompt = f"""作为风控官(Risk_Manager)，您专注于风险量化和仓位管理，不做多空判断，只负责评估和控制风险敞口。
+
+以下是交易员的初步决策方案：
 {trader_decision}
 
-Your task is to challenge both the Risky and Safe Analysts, pointing out where each perspective may be overly optimistic or overly cautious. Use insights from the following data sources to support a moderate, sustainable strategy to adjust the trader's decision:
+【您的核心职责】
+1. 量化当前持仓的最大可能亏损
+2. 评估杠杆风险和流动性风险
+3. 识别潜在的供给压力（解禁、大宗交易）
+4. 给出具体的仓位建议和止损位
 
-Market Research Report: {market_research_report}
-Social Media Sentiment Report: {sentiment_report}
-Latest World Affairs Report: {news_report}
-Company Fundamentals Report: {fundamentals_report}
-Here is the current conversation history: {history} Here is the last response from the risky analyst: {current_risky_response} Here is the last response from the safe analyst: {current_safe_response}. If there are no responses from the other viewpoints, do not halluncinate and just present your point.
+【数据引用要求】在辩论中必须引用以下数据支撑风险评估：
 
-Engage actively by analyzing both sides critically, addressing weaknesses in the risky and conservative arguments to advocate for a more balanced approach. Challenge each of their points to illustrate why a moderate risk strategy might offer the best of both worlds, providing growth potential while safeguarding against extreme volatility. Focus on debating rather than simply presenting data, aiming to show that a balanced view can lead to the most reliable outcomes. Output conversationally as if you are speaking without any special formatting."""
+1. **杠杆风险数据**（来自情绪分析报告）:
+   - 融资余额及近期变化趋势
+   - 融资余额快速上升=杠杆情绪升温，回撤时波动会放大
+   - 引用格式："融资余额近10日从X亿升至Y亿（+Z%），杠杆风险【高/中/低】"
+
+2. **股权质押风险**（来自情绪分析报告）:
+   - 大股东质押比例
+   - 质押比例>30%需重点预警
+   - 当前股价距离质押预警线/平仓线的安全距离
+   - 引用格式："大股东质押比例X%，风险等级【高危/警惕/正常】"
+
+3. **限售解禁压力**（来自市场分析报告）:
+   - 未来6个月解禁时点和规模
+   - 解禁数量占流通股比例
+   - 解禁股东类型（定增/IPO/股权激励）及其减持倾向
+   - 引用格式："X月Y日将解禁Z亿股，占流通股W%，属于【高压/中压/低压】"
+
+4. **大宗交易信号**（来自情绪分析报告）:
+   - 近期大宗交易频次和折溢价率
+   - 连续大宗交易且折价>5%=可能的减持信号
+   - 买卖方席位类型（机构专用/游资/自然人）
+   - 引用格式："近30日大宗交易X笔，平均折价Y%，减持信号【明显/一般/无】"
+
+5. **筹码结构风险**（来自情绪分析报告）:
+   - 股东人数变化趋势
+   - 筹码分散=回撤时承接力弱
+   - 引用格式："股东人数从X万增至Y万，筹码【集中/分散】"
+
+【风控原则】
+- 单票仓位上限：总资产的10%
+- 单笔亏损上限：账户的2%
+- 相关性限制：同行业暴露不超过30%
+- 当质押/解禁/杠杆三因素叠加时，必须建议降低仓位
+
+【辩论策略】
+- 不参与多空方向判断，只做风险量化
+- 当趋势交易员(Momentum_Trader)过于乐观时，用杠杆数据和解禁压力提示风险
+- 当价值投资者(Value_Investor)过于保守时，指出风险可控的情况下可以适度参与
+- 给出具体可执行的风控建议：仓位比例、止损位、分批策略
+
+【必须输出的内容】
+1. 风险评估矩阵（列出各类风险及等级）
+2. 建议仓位：占总资产的X%（基于当前风险等级）
+3. 止损位：跌破X元必须执行减仓
+4. 风险情景分析：最坏情况下的预期亏损
+
+以下是分析数据来源：
+
+市场分析报告（技术面+解禁日历）：{market_research_report}
+情绪分析报告（资金流向+融资融券+质押+大宗交易）：{sentiment_report}
+新闻舆情报告：{news_report}
+基本面分析报告：{fundamentals_report}
+
+当前辩论历史：{history}
+趋势交易员(Momentum_Trader)最新观点：{current_risky_response}
+价值投资者(Value_Investor)最新观点：{current_safe_response}
+{reflection_context}
+如果其他角色尚未发言，请直接基于数据给出您的风险评估，不要虚构他人观点。
+
+请用中文以口语化的方式输出您的风控评估和仓位建议，必须引用具体数据支撑您的判断。"""
 
         response = llm.invoke(prompt)
 
-        argument = f"Neutral Analyst: {response.content}"
+        argument = f"风控官(Risk_Manager): {response.content}"
 
         new_risk_debate_state = {
             "history": history + "\n" + argument,
             "risky_history": risk_debate_state.get("risky_history", ""),
             "safe_history": risk_debate_state.get("safe_history", ""),
             "neutral_history": neutral_history + "\n" + argument,
-            "latest_speaker": "Neutral",
+            "latest_speaker": "Risk_Manager",
             "current_risky_response": risk_debate_state.get(
                 "current_risky_response", ""
             ),
