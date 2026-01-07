@@ -48,16 +48,18 @@ class StockDataCache:
             dir_path.mkdir(exist_ok=True)
 
         # Cache configuration - different TTL settings for different markets
+        # 优化后的TTL设置，平衡实时性和API配额
         self.cache_config = {
             'us_stock_data': {
-                'ttl_hours': 2,  # US stock data cached for 2 hours (considering API limits)
+                'ttl_hours': 2,  # US stock data cached for 2 hours
                 'max_files': 1000,
                 'description': 'US stock historical data'
             },
             'china_stock_data': {
-                'ttl_hours': 1,  # A-share data cached for 1 hour (high real-time requirement)
+                'ttl_hours': 4,  # A股数据缓存4小时（交易时间9:30-15:00，盘中更新1-2次足够）
                 'max_files': 1000,
-                'description': 'A-share historical data'
+                'description': 'A-share historical data',
+                'invalidate_on_open': True  # 开盘时自动失效
             },
             'us_news': {
                 'ttl_hours': 6,  # US stock news cached for 6 hours
@@ -75,9 +77,20 @@ class StockDataCache:
                 'description': 'US stock fundamentals data'
             },
             'china_fundamentals': {
-                'ttl_hours': 12,  # A-share fundamentals cached for 12 hours
+                'ttl_hours': 24,  # A股基本面缓存24小时（季报数据变化不频繁）
                 'max_files': 200,
                 'description': 'A-share fundamentals data'
+            },
+            # 新增：情绪和资金流向缓存配置
+            'china_sentiment': {
+                'ttl_hours': 2,  # 情绪数据缓存2小时（盘中变化较快）
+                'max_files': 500,
+                'description': 'A-share sentiment and money flow data'
+            },
+            'china_valuation': {
+                'ttl_hours': 8,  # 估值数据缓存8小时（每日更新一次）
+                'max_files': 300,
+                'description': 'A-share valuation metrics (PE/PB/etc.)'
             }
         }
 
@@ -400,36 +413,155 @@ class StockDataCache:
         """Clean up expired cache files"""
         try:
             cleaned_count = 0
-            
+
             # Check all metadata files
             if self.metadata_dir.exists():
                 for metadata_file in self.metadata_dir.glob("*_meta.json"):
                     try:
                         cache_key = metadata_file.stem.replace("_meta", "")
-                        
+
                         # Load metadata
                         with open(metadata_file, 'r', encoding='utf-8') as f:
                             metadata = json.load(f)
-                        
+
                         # Check if cache is expired
                         if not self.is_cache_valid(cache_key, metadata.get("symbol"), "stock_data"):
                             # Remove cache file
                             cache_path = Path(metadata["file_path"])
                             if cache_path.exists():
                                 cache_path.unlink()
-                            
+
                             # Remove metadata file
                             metadata_file.unlink()
                             cleaned_count += 1
                             print(f"🗑️ Cleaned expired cache: {cache_key}")
-                    
+
                     except Exception as e:
                         print(f"⚠️ Failed to clean cache file {metadata_file}: {e}")
-            
+
             print(f"✅ Cache cleanup completed, removed {cleaned_count} expired files")
-            
+
         except Exception as e:
             print(f"❌ Failed to cleanup cache: {e}")
+
+    def cleanup_lru(self, max_size_mb: float = 500, target_size_mb: float = 400) -> Dict[str, Any]:
+        """
+        LRU缓存清理 - 当缓存超过最大大小时，删除最久未访问的文件
+
+        Args:
+            max_size_mb: 触发清理的最大缓存大小(MB)
+            target_size_mb: 清理后的目标大小(MB)
+
+        Returns:
+            Dict: 清理结果统计
+        """
+        result = {
+            "triggered": False,
+            "initial_size_mb": 0,
+            "final_size_mb": 0,
+            "files_removed": 0,
+            "space_freed_mb": 0
+        }
+
+        try:
+            # 计算当前缓存大小
+            stats = self.get_cache_stats()
+            current_size = stats.get("total_size_mb", 0)
+            result["initial_size_mb"] = current_size
+
+            if current_size <= max_size_mb:
+                result["final_size_mb"] = current_size
+                print(f"📊 Cache size ({current_size:.1f}MB) within limit ({max_size_mb}MB), no cleanup needed")
+                return result
+
+            result["triggered"] = True
+            print(f"⚠️ Cache size ({current_size:.1f}MB) exceeds limit ({max_size_mb}MB), starting LRU cleanup...")
+
+            # 收集所有缓存文件及其访问时间
+            cache_files = []
+            for dir_path in [self.us_stock_dir, self.china_stock_dir, self.us_news_dir,
+                           self.china_news_dir, self.us_fundamentals_dir, self.china_fundamentals_dir]:
+                if dir_path.exists():
+                    for file_path in dir_path.glob("*"):
+                        if file_path.is_file():
+                            try:
+                                stat = file_path.stat()
+                                cache_files.append({
+                                    "path": file_path,
+                                    "size_mb": stat.st_size / (1024 * 1024),
+                                    "atime": stat.st_atime,  # 最后访问时间
+                                    "mtime": stat.st_mtime   # 最后修改时间
+                                })
+                            except Exception:
+                                pass
+
+            # 按访问时间排序（最久未访问的在前）
+            cache_files.sort(key=lambda x: x["atime"])
+
+            # 删除文件直到达到目标大小
+            space_to_free = current_size - target_size_mb
+            freed = 0
+
+            for file_info in cache_files:
+                if freed >= space_to_free:
+                    break
+
+                try:
+                    file_path = file_info["path"]
+                    file_size = file_info["size_mb"]
+
+                    # 删除数据文件
+                    file_path.unlink()
+
+                    # 尝试删除对应的元数据文件
+                    cache_key = file_path.stem
+                    metadata_path = self._get_metadata_path(cache_key)
+                    if metadata_path.exists():
+                        metadata_path.unlink()
+
+                    freed += file_size
+                    result["files_removed"] += 1
+
+                except Exception as e:
+                    print(f"⚠️ Failed to remove {file_path}: {e}")
+
+            result["space_freed_mb"] = round(freed, 2)
+            result["final_size_mb"] = round(current_size - freed, 2)
+
+            print(f"✅ LRU cleanup completed: removed {result['files_removed']} files, freed {freed:.1f}MB")
+            print(f"   Cache size: {current_size:.1f}MB -> {result['final_size_mb']:.1f}MB")
+
+        except Exception as e:
+            print(f"❌ LRU cleanup failed: {e}")
+            result["error"] = str(e)
+
+        return result
+
+    def auto_cleanup(self, max_size_mb: float = 500) -> Dict[str, Any]:
+        """
+        自动缓存清理 - 先清理过期缓存，再执行LRU清理
+
+        Args:
+            max_size_mb: 最大缓存大小(MB)
+
+        Returns:
+            Dict: 清理结果汇总
+        """
+        result = {
+            "expired_cleanup": None,
+            "lru_cleanup": None
+        }
+
+        # 1. 先清理过期缓存
+        print("🔄 Phase 1: Cleaning expired cache...")
+        self.cleanup_expired_cache()
+        result["expired_cleanup"] = "completed"
+
+        # 2. 检查是否需要LRU清理
+        print("🔄 Phase 2: Checking LRU cleanup...")
+        result["lru_cleanup"] = self.cleanup_lru(max_size_mb, max_size_mb * 0.8)
+
+        return result
 
 
 # Global cache instance

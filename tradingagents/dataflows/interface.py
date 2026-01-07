@@ -716,6 +716,47 @@ def get_YFin_data(
     return filtered_data
 
 
+def _extract_text_from_responses_api(response):
+    """从 OpenAI Responses API 响应中提取文本内容
+
+    Responses API 使用 web_search_preview 工具时，输出格式为：
+    - output[0]: web_search 调用 (ResponseFunctionWebSearch 类型)
+    - output[1] 或更后面: message 类型的响应
+
+    需要遍历 output 找到 type='message' 的项目来获取文本。
+    """
+    if not hasattr(response, 'output') or not response.output:
+        # 尝试使用 output_text 属性 (如果存在)
+        if hasattr(response, 'output_text') and response.output_text:
+            return response.output_text
+        return ""
+
+    # 遍历 output 寻找 message 类型
+    for item in response.output:
+        if hasattr(item, 'type') and item.type == 'message':
+            # 找到 message，提取文本
+            if hasattr(item, 'content') and item.content:
+                for content_item in item.content:
+                    if hasattr(content_item, 'text'):
+                        return content_item.text
+
+    # 如果没找到 message 类型，尝试直接访问第一个有 content 的项
+    for item in response.output:
+        if hasattr(item, 'content'):
+            if isinstance(item.content, list) and item.content:
+                for content_item in item.content:
+                    if hasattr(content_item, 'text'):
+                        return content_item.text
+            elif isinstance(item.content, str):
+                return item.content
+
+    # 最后尝试 output_text
+    if hasattr(response, 'output_text') and response.output_text:
+        return response.output_text
+
+    return ""
+
+
 def get_stock_news_openai(ticker, curr_date):
     config = get_config()
     client = OpenAI(base_url=config["backend_url"])
@@ -748,7 +789,7 @@ def get_stock_news_openai(ticker, curr_date):
         store=True,
     )
 
-    return response.output[1].content[0].text
+    return _extract_text_from_responses_api(response)
 
 
 def get_global_news_openai(curr_date):
@@ -783,7 +824,7 @@ def get_global_news_openai(curr_date):
         store=True,
     )
 
-    return response.output[1].content[0].text
+    return _extract_text_from_responses_api(response)
 
 
 def get_fundamentals_openai(ticker, curr_date):
@@ -818,7 +859,7 @@ def get_fundamentals_openai(ticker, curr_date):
         store=True,
     )
 
-    return response.output[1].content[0].text
+    return _extract_text_from_responses_api(response)
 
 
 def get_fundamentals_finnhub(ticker, curr_date):
