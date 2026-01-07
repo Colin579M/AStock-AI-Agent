@@ -111,8 +111,10 @@ class GraphSetup:
         )
 
         # Create consolidation analyst node (for A-shares only)
+        # 使用 trader_memory 作为决策记忆，自动记录每次分析决策
         consolidation_analyst_node = create_consolidation_analyst(
-            self.deep_thinking_llm
+            self.deep_thinking_llm,
+            decision_memory=self.trader_memory
         )
 
         # Create workflow
