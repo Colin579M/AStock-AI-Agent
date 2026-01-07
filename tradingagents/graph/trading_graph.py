@@ -3,31 +3,14 @@
 import os
 from pathlib import Path
 import json
-from datetime import date
-from typing import Dict, Any, Tuple, List, Optional
+from typing import Dict, Any
 
-from langchain_openai import ChatOpenAI
-from langchain_anthropic import ChatAnthropic
-from langchain_google_genai import ChatGoogleGenerativeAI
-
-# Import DashScope adapter if available
-try:
-    from tradingagents.llm_adapters.dashscope_adapter import ChatDashScope
-    DASHSCOPE_AVAILABLE = True
-except ImportError:
-    DASHSCOPE_AVAILABLE = False
-    ChatDashScope = None
-
-from langgraph.prebuilt import ToolNode
+from .llm_factory import create_llm_pair
+from .tool_nodes_factory import create_tool_nodes
 
 from tradingagents.agents import *
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.agents.utils.memory import FinancialSituationMemory
-from tradingagents.agents.utils.agent_states import (
-    AgentState,
-    InvestDebateState,
-    RiskDebateState,
-)
 from tradingagents.dataflows.interface import set_config
 
 from .conditional_logic import ConditionalLogic
@@ -65,45 +48,8 @@ class TradingAgentsGraph:
             exist_ok=True,
         )
 
-        # Initialize LLMs
-        if self.config["llm_provider"].lower() == "openai" or self.config["llm_provider"] == "ollama" or self.config["llm_provider"] == "openrouter":
-            self.deep_thinking_llm = ChatOpenAI(model=self.config["deep_think_llm"], base_url=self.config["backend_url"])
-            self.quick_thinking_llm = ChatOpenAI(model=self.config["quick_think_llm"], base_url=self.config["backend_url"])
-        elif self.config["llm_provider"].lower() == "anthropic":
-            self.deep_thinking_llm = ChatAnthropic(model=self.config["deep_think_llm"], base_url=self.config["backend_url"])
-            self.quick_thinking_llm = ChatAnthropic(model=self.config["quick_think_llm"], base_url=self.config["backend_url"])
-        elif self.config["llm_provider"].lower() == "google":
-            google_api_key = os.getenv('GOOGLE_API_KEY')
-            self.deep_thinking_llm = ChatGoogleGenerativeAI(
-                model=self.config["deep_think_llm"],
-                google_api_key=google_api_key,
-                temperature=0.1,
-                max_tokens=2000
-            )
-            self.quick_thinking_llm = ChatGoogleGenerativeAI(
-                model=self.config["quick_think_llm"],
-                google_api_key=google_api_key,
-                temperature=0.1,
-                max_tokens=2000
-            )
-        elif (self.config["llm_provider"].lower() == "dashscope" or
-              "dashscope" in self.config["llm_provider"].lower() or
-              "alibaba" in self.config["llm_provider"].lower()):
-            if not DASHSCOPE_AVAILABLE:
-                raise ValueError("DashScope adapter not available. Please install dashscope package: pip install dashscope")
-
-            self.deep_thinking_llm = ChatDashScope(
-                model=self.config["deep_think_llm"],
-                temperature=0.1,
-                max_tokens=2000
-            )
-            self.quick_thinking_llm = ChatDashScope(
-                model=self.config["quick_think_llm"],
-                temperature=0.1,
-                max_tokens=2000
-            )
-        else:
-            raise ValueError(f"Unsupported LLM provider: {self.config['llm_provider']}")
+        # Initialize LLMs using factory
+        self.deep_thinking_llm, self.quick_thinking_llm = create_llm_pair(self.config)
         
         self.toolkit = Toolkit(config=self.config)
 
@@ -114,11 +60,14 @@ class TradingAgentsGraph:
         self.invest_judge_memory = FinancialSituationMemory("invest_judge_memory", self.config)
         self.risk_manager_memory = FinancialSituationMemory("risk_manager_memory", self.config)
 
-        # Create tool nodes
-        self.tool_nodes = self._create_tool_nodes()
+        # Create tool nodes using factory
+        self.tool_nodes = create_tool_nodes(self.toolkit)
 
-        # Initialize components
-        self.conditional_logic = ConditionalLogic()
+        # Initialize components with config values for debate/discussion rounds
+        self.conditional_logic = ConditionalLogic(
+            max_debate_rounds=self.config.get("max_debate_rounds", 1),
+            max_risk_discuss_rounds=self.config.get("max_risk_discuss_rounds", 1)
+        )
         self.graph_setup = GraphSetup(
             self.quick_thinking_llm,
             self.deep_thinking_llm,
@@ -143,103 +92,6 @@ class TradingAgentsGraph:
 
         # Set up the graph
         self.graph = self.graph_setup.setup_graph(selected_analysts)
-
-    def _create_tool_nodes(self) -> Dict[str, ToolNode]:
-        """Create tool nodes for different data sources."""
-        return {
-            "market": ToolNode(
-                [
-                    # 中国A股工具 - 通达信API
-                    self.toolkit.get_china_stock_data,
-                    self.toolkit.get_china_market_overview,
-                    # 中国A股基本信息 - Tushare Pro（股票名称）
-                    self.toolkit.get_tushare_stock_basic,
-                    # 中国A股估值工具 - Tushare Pro（PE/PB/市值/换手率）
-                    self.toolkit.get_tushare_daily_basic,
-                    # 美股/其他市场工具 - Yahoo Finance (online)
-                    self.toolkit.get_YFin_data_online,
-                    self.toolkit.get_stockstats_indicators_report_online,
-                    # offline tools
-                    self.toolkit.get_YFin_data,
-                    self.toolkit.get_stockstats_indicators_report,
-                ]
-            ),
-            "social": ToolNode(
-                [
-                    # 中国A股基本信息 - Tushare Pro（股票名称）
-                    self.toolkit.get_tushare_stock_basic,
-                    # 中国A股情绪工具 - Tushare Pro（高质量数据）
-                    self.toolkit.get_tushare_moneyflow,          # 资金流向（大/中/小单）
-                    self.toolkit.get_tushare_hsgt_flow,          # 北向资金
-                    self.toolkit.get_tushare_margin,             # 融资融券
-                    self.toolkit.get_tushare_top10_holders,      # 前十大股东
-                    self.toolkit.get_tushare_holder_number,      # 股东人数（筹码集中度）
-                    self.toolkit.get_tushare_top_list,           # 龙虎榜
-                    self.toolkit.get_tushare_sentiment_comprehensive,  # 综合情绪数据包
-                    # 中国A股情绪工具 - akshare（备用）
-                    self.toolkit.get_china_stock_sentiment,
-                    self.toolkit.get_china_money_flow,
-                    # online tools
-                    self.toolkit.get_stock_news_openai,
-                    # offline tools
-                    self.toolkit.get_reddit_stock_info,
-                ]
-            ),
-            "news": ToolNode(
-                [
-                    # 中国A股基本信息 - Tushare Pro（股票名称）
-                    self.toolkit.get_tushare_stock_basic,
-                    # 中国财经新闻工具 - akshare
-                    self.toolkit.get_china_stock_news,
-                    self.toolkit.get_china_market_news,
-                    # 中国宏观经济 - Tushare Pro
-                    self.toolkit.get_tushare_pmi,                # PMI采购经理指数
-                    # online tools
-                    self.toolkit.get_global_news_openai,
-                    self.toolkit.get_google_news,
-                    # offline tools
-                    self.toolkit.get_finnhub_news,
-                    self.toolkit.get_reddit_news,
-                ]
-            ),
-            "fundamentals": ToolNode(
-                [
-                    # 中国A股基本面工具 - Tushare Pro（高质量数据，优先使用）
-                    self.toolkit.get_tushare_financial_statements,      # 财务三表（利润表/资产负债表/现金流）
-                    self.toolkit.get_tushare_financial_indicators,      # 财务指标（150+指标）
-                    self.toolkit.get_tushare_daily_basic,               # 每日估值（PE/PB/市值）
-                    self.toolkit.get_tushare_forecast,                  # 业绩预告
-                    self.toolkit.get_tushare_dividend,                  # 分红历史
-                    self.toolkit.get_tushare_stock_basic,               # 股票基本信息（准确名称）
-                    self.toolkit.get_tushare_fundamentals_comprehensive, # 基本面综合数据包
-                    # 中国A股基本面工具 - akshare（备用）
-                    self.toolkit.get_china_financial_report,
-                    self.toolkit.get_china_stock_indicators,
-                    self.toolkit.get_china_earnings_forecast,
-                    # online tools
-                    self.toolkit.get_fundamentals_openai,
-                    # offline tools
-                    self.toolkit.get_finnhub_company_insider_sentiment,
-                    self.toolkit.get_finnhub_company_insider_transactions,
-                    self.toolkit.get_simfin_balance_sheet,
-                    self.toolkit.get_simfin_cashflow,
-                    self.toolkit.get_simfin_income_stmt,
-                ]
-            ),
-            "china_market": ToolNode(
-                [
-                    # 中国A股数据 - 通达信API（行情数据）
-                    self.toolkit.get_china_stock_data,
-                    self.toolkit.get_china_market_overview,
-                    # 中国A股数据 - Tushare Pro（估值数据）
-                    self.toolkit.get_tushare_daily_basic,
-                    self.toolkit.get_tushare_stock_basic,
-                    # 备用数据源
-                    self.toolkit.get_YFin_data_online,
-                    self.toolkit.get_stockstats_indicators_report_online,
-                ]
-            ),
-        }
 
     def propagate(self, company_name, trade_date):
         """Run the trading agents graph for a company on a specific date."""
