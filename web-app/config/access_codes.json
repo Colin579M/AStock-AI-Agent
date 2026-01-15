@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "codes": [
+    {
+      "code_hash": "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9",
+      "user_id": "admin",
+      "name": "管理员",
+      "expires_at": null,
+      "is_active": true
+    },
+    {
+      "code_hash": "d1c143e47c610c85880717265c25183b2f97946bd7c1a9dba1234556c98c14d4",
+      "user_id": "mom",
+      "name": "妈妈",
+      "expires_at": "2027-12-31T00:00:00Z",
+      "is_active": true
+    }
+  ]
+}

@@ -12,6 +12,7 @@ LLM Factory Module
 
 import os
 import logging
+import threading
 from typing import Dict, Any, Tuple
 
 from langchain_openai import ChatOpenAI
@@ -23,32 +24,35 @@ logger = logging.getLogger(__name__)
 # 延迟导入适配器，避免强制依赖
 _DASHSCOPE_ADAPTER = None
 _OPENAI_RESPONSES_ADAPTER = None
+_adapter_lock = threading.Lock()  # 线程安全锁
 
 
 def _get_dashscope_adapter():
-    """延迟加载 DashScope 适配器"""
+    """延迟加载 DashScope 适配器（线程安全）"""
     global _DASHSCOPE_ADAPTER
-    if _DASHSCOPE_ADAPTER is None:
-        try:
-            from tradingagents.llm_adapters.dashscope_adapter import ChatDashScope
-            _DASHSCOPE_ADAPTER = ChatDashScope
-        except ImportError:
-            _DASHSCOPE_ADAPTER = False
-            logger.warning("DashScope adapter not available. Install: pip install dashscope")
-    return _DASHSCOPE_ADAPTER if _DASHSCOPE_ADAPTER else None
+    with _adapter_lock:
+        if _DASHSCOPE_ADAPTER is None:
+            try:
+                from tradingagents.llm_adapters.dashscope_adapter import ChatDashScope
+                _DASHSCOPE_ADAPTER = ChatDashScope
+            except ImportError:
+                _DASHSCOPE_ADAPTER = False
+                logger.warning("DashScope adapter not available. Install: pip install dashscope")
+        return _DASHSCOPE_ADAPTER if _DASHSCOPE_ADAPTER else None
 
 
 def _get_openai_responses_adapter():
-    """延迟加载 OpenAI Responses API 适配器"""
+    """延迟加载 OpenAI Responses API 适配器（线程安全）"""
     global _OPENAI_RESPONSES_ADAPTER
-    if _OPENAI_RESPONSES_ADAPTER is None:
-        try:
-            from tradingagents.llm_adapters.openai_responses_adapter import ChatOpenAIResponses
-            _OPENAI_RESPONSES_ADAPTER = ChatOpenAIResponses
-        except ImportError:
-            _OPENAI_RESPONSES_ADAPTER = False
-            logger.debug("OpenAI Responses adapter not available, will use Chat Completions API")
-    return _OPENAI_RESPONSES_ADAPTER if _OPENAI_RESPONSES_ADAPTER else None
+    with _adapter_lock:
+        if _OPENAI_RESPONSES_ADAPTER is None:
+            try:
+                from tradingagents.llm_adapters.openai_responses_adapter import ChatOpenAIResponses
+                _OPENAI_RESPONSES_ADAPTER = ChatOpenAIResponses
+            except ImportError:
+                _OPENAI_RESPONSES_ADAPTER = False
+                logger.debug("OpenAI Responses adapter not available, will use Chat Completions API")
+        return _OPENAI_RESPONSES_ADAPTER if _OPENAI_RESPONSES_ADAPTER else None
 
 
 def create_llm(config: Dict[str, Any], llm_type: str = "deep"):
@@ -116,6 +120,22 @@ def create_llm_pair(config: Dict[str, Any]) -> Tuple[Any, Any]:
 
 def _create_openai_llm(config: Dict[str, Any], model_name: str, backend_url: str, llm_type: str):
     """创建 OpenAI LLM 实例"""
+    # 检测是否是 DeepSeek 或其他不支持 Responses API 的服务
+    # DeepSeek 只支持 Chat Completions API，直接使用 ChatOpenAI
+    is_deepseek = backend_url and "deepseek" in backend_url.lower()
+
+    # 从 config 获取 max_tokens，默认 2000（平衡速度和能力）
+    max_tokens = config.get('max_tokens', 2000)
+
+    if is_deepseek:
+        logger.info(f"检测到 DeepSeek API，使用 Chat Completions API: {model_name}, max_tokens={max_tokens}")
+        return ChatOpenAI(
+            model=model_name,
+            base_url=backend_url,
+            temperature=0.1,
+            max_tokens=max_tokens
+        )
+
     # 尝试使用 Responses API (推荐用于 GPT-4.5/5 等新模型)
     ChatOpenAIResponses = _get_openai_responses_adapter()
 

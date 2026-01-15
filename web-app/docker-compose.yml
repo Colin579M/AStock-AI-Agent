@@ -1,0 +1,38 @@
+services:
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: ""  # 使用相对路径，通过 nginx 代理
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ..  # 项目根目录，以便访问 requirements.txt
+      dockerfile: web-app/backend/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      # 挂载 tradingagents 模块
+      - ../tradingagents:/app/tradingagents:ro
+      # 挂载配置文件
+      - ./config:/app/config:ro
+      # 挂载数据目录（results, chroma_db）
+      - ../results:/app/results
+      - ../chroma_db:/app/chroma_db
+    environment:
+      - JWT_SECRET=${JWT_SECRET:-your-secret-key-change-in-production}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - TUSHARE_TOKEN=${TUSHARE_TOKEN}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
+      - PYTHONPATH=/app:/app/tradingagents
+    restart: unless-stopped
+
+volumes:
+  results:
+  chroma_db:

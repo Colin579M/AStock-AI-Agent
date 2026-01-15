@@ -7,10 +7,164 @@ A股综合研报生成器
 
 import re
 import logging
-from typing import Any, Dict, Optional
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 from tradingagents.agents.utils.agent_utils import is_china_stock
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_current_price(market_report: str) -> Optional[float]:
+    """
+    从市场报告中提取当前/收盘价格
+
+    Args:
+        market_report: 市场技术分析报告文本
+
+    Returns:
+        float: 当前价格，提取失败返回 None
+    """
+    if not market_report:
+        return None
+
+    # 按优先级尝试多种价格模式
+    patterns = [
+        r'当前价[格]?[：:]\s*([\d.]+)',
+        r'收盘价[：:]\s*([\d.]+)',
+        r'最新价[：:]\s*([\d.]+)',
+        r'现价[：:]\s*([\d.]+)',
+        r'close[：:]\s*([\d.]+)',
+        r'\|\s*收盘价\s*\|\s*([\d.]+)',
+        r'股价[：:]\s*([\d.]+)',
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, market_report, re.IGNORECASE)
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                continue
+
+    return None
+
+
+def _auto_update_past_outcomes(
+    memory,
+    ticker: str,
+    current_date: str,
+    current_price: float
+) -> Dict[str, Any]:
+    """
+    自动更新该股票历史决策的实际结果
+
+    在每次分析时调用，检查该股票的历史决策，计算实际收益
+
+    Args:
+        memory: FinancialSituationMemory 实例
+        ticker: 股票代码
+        current_date: 当前分析日期 (YYYY-MM-DD)
+        current_price: 当前股价
+
+    Returns:
+        Dict: 更新结果统计 {updated: int, skipped: int, errors: int}
+    """
+    from tradingagents.agents.utils.memory import get_historical_price
+
+    result = {"updated": 0, "skipped": 0, "errors": 0, "details": []}
+
+    if memory is None or current_price is None:
+        return result
+
+    try:
+        # 获取所有记录
+        all_records = memory.situation_collection.get(include=["metadatas"])
+
+        if not all_records["ids"]:
+            return result
+
+        # 筛选该股票的未更新记录
+        for i, metadata in enumerate(all_records["metadatas"]):
+            record_id = all_records["ids"][i]
+            record_ticker = metadata.get("ticker", "")
+            outcome_updated = metadata.get("outcome_updated", False)
+            decision_date = metadata.get("decision_date", "")
+
+            # 只处理同一股票、未更新结果、且不是当天的记录
+            if record_ticker != ticker:
+                continue
+            if outcome_updated:
+                result["skipped"] += 1
+                continue
+            if decision_date == current_date:
+                result["skipped"] += 1
+                continue
+            if not decision_date:
+                result["skipped"] += 1
+                continue
+
+            try:
+                # 获取决策日的历史价格
+                decision_price = get_historical_price(ticker, decision_date)
+
+                if decision_price is None:
+                    logger.warning(f"无法获取 {ticker} 在 {decision_date} 的历史价格")
+                    result["errors"] += 1
+                    continue
+
+                # 计算持仓天数
+                try:
+                    date_format = "%Y-%m-%d"
+                    d1 = datetime.strptime(decision_date, date_format)
+                    d2 = datetime.strptime(current_date, date_format)
+                    days_held = (d2 - d1).days
+                except ValueError:
+                    days_held = 0
+
+                # 计算实际收益率
+                actual_return = (current_price - decision_price) / decision_price * 100
+
+                # 根据决策类型调整收益（SELL决策收益反转）
+                decision_type = metadata.get("decision_type", "HOLD")
+                if decision_type in ["SELL", "STRONG_SELL", "REDUCE"]:
+                    actual_return = -actual_return
+
+                # 更新结果
+                success = memory.update_outcome(
+                    record_id=record_id,
+                    actual_return=actual_return,
+                    days_held=days_held,
+                    exit_date=current_date,
+                    exit_reason=f"自动追踪: 决策价 {decision_price:.2f} → 当前价 {current_price:.2f}"
+                )
+
+                if success:
+                    result["updated"] += 1
+                    result["details"].append({
+                        "record_id": record_id,
+                        "decision_date": decision_date,
+                        "decision_price": decision_price,
+                        "current_price": current_price,
+                        "return": actual_return,
+                        "days_held": days_held
+                    })
+                    logger.info(
+                        f"✅ 自动更新历史决策 {record_id}: "
+                        f"{decision_price:.2f} → {current_price:.2f}, "
+                        f"收益 {actual_return:.2f}%, 持仓 {days_held} 天"
+                    )
+                else:
+                    result["errors"] += 1
+
+            except Exception as e:
+                logger.warning(f"更新记录 {record_id} 时出错: {e}")
+                result["errors"] += 1
+
+    except Exception as e:
+        logger.error(f"自动追踪历史决策失败: {e}")
+        result["errors"] += 1
+
+    return result
 
 
 CONSOLIDATION_SYSTEM_PROMPT = '''您是一位资深的A股投资研究总监，负责整合团队的研究成果并撰写最终的综合研究报告。
@@ -33,61 +187,85 @@ CONSOLIDATION_SYSTEM_PROMPT = '''您是一位资深的A股投资研究总监，�
 
 ### 1. 执行摘要 (Executive Summary)
 - 投资评级：【强烈买入/买入/持有/减持/卖出】
-- 目标价位：基于估值分析给出合理目标价
-- 核心投资逻辑（3-5点，每点一句话概括）
+- **目标价位推导**（必须展示计算过程）：
+  - 方法：说明采用的估值方法（PB法/PE法/DCF等）
+  - 计算：展示具体公式和数值，例如：
+    - PB法：目标价 = 每股净资产(BVPS) × 目标PB = X × Y = Z元
+    - PE法：目标价 = 每股收益(EPS) × 目标PE = X × Y = Z元
+  - 结论：目标价 XX 元（较现价 ±X%）
+- 核心投资逻辑（3-5点，每点需引用具体数据）
 - 主要风险提示（2-3点）
 
 ### 2. 多维度分析汇总
 
 #### 2.1 基本面评估
-- 盈利能力与成长性（引用具体财务数据）
-- 估值水平合理性（PE/PB与行业对比）
+- 盈利能力与成长性（**必须引用具体数据**，格式：指标名=数值，据XX报告）
+- 估值水平合理性：
+  - 当前PE/PB数值及其近期分位（如：PE 7.2，处于近1年 XX% 分位）
+  - 与行业均值/可比公司对比
 - 财务健康度（资产负债率、现金流等）
 
 #### 2.2 技术面评估
 - 当前趋势判断（多头/空头/震荡）
-- 关键价位（支撑位/阻力位，给出具体数字）
-- 技术指标信号（RSI、MACD等信号解读）
+- 关键价位（**必须给出具体数字**）：
+  - 第一支撑位：XX元（依据：XX）
+  - 第二支撑位：XX元（依据：XX）
+  - 第一阻力位：XX元（依据：XX）
+  - 关键突破位：XX元
+- 技术指标信号：
+  - RSI=XX（超买>70/超卖<30/中性）
+  - MACD=XX（金叉/死叉/零轴上下）
 
 #### 2.3 资金面评估
-- 主力资金动向（净流入/流出金额）
-- 北向资金态度（增持/减持）
-- 市场情绪指标（热度排名、千股千评等）
+- 主力资金动向：近X日净流入/流出 XX万元（据情绪报告）
+- 北向资金态度：持股比例变化、近期增减持
+- 融资余额：XX亿元，近X日变化 XX%（判断杠杆情绪）
 
 #### 2.4 消息面评估
-- 重大利好/利空（具体事件）
+- 重大利好/利空（**具体事件+日期**）
 - 行业政策影响
-- 宏观经济背景（PMI等指标）
+- 宏观经济背景（PMI=XX，处于扩张/收缩区间）
 
 ### 3. 投资建议
 
 #### 3.1 操作策略
-- **建议仓位**：给出具体百分比
-- **入场时机**：描述具体触发条件
-- **目标价位**：短期（1个月）/ 中期（3-6个月）目标
-- **止损价位**：风险控制点位
+- **建议仓位**：XX%（给出理由）
+- **盈亏比测算**（必须计算）：
+  - 潜在收益：目标价XX - 现价XX = +XX元（+XX%）
+  - 潜在亏损：现价XX - 止损价XX = -XX元（-XX%）
+  - **盈亏比 = 潜在收益/潜在亏损 = X:1**
+  - 评估：盈亏比>2:1为可接受，<1.5:1不建议入场
+- **入场时机**（条件触发式，必须具体）：
+  - 方案A（回踩买入）：价格回落至XX-XX区间 + 企稳信号（如：缩量不破/阳线反包）
+  - 方案B（突破买入）：放量突破XX并站稳X个交易日 + 资金面配合（全口径转正）
+- **目标价位**：
+  - 短期（1个月）：XX元（技术阻力位）
+  - 中期（3-6个月）：XX元（估值目标）
+- **止损价位**：XX元（跌破此位执行止损，理由：XX）
 
-#### 3.2 分批建仓计划（如适用）
-| 批次 | 价位区间 | 仓位占比 | 触发条件 |
-|------|---------|---------|---------|
-| 第一批 | | | |
-| 第二批 | | | |
+#### 3.2 分批建仓/减仓计划
+| 批次 | 价位区间 | 仓位占比 | 触发条件（必须具体） |
+|------|---------|---------|---------------------|
+| 第一批 | XX-XX元 | XX% | 条件1 + 条件2 |
+| 第二批 | XX-XX元 | XX% | 条件1 + 条件2 |
 
 ### 4. 风险评估矩阵
 
-| 风险类型 | 风险描述 | 概率 | 影响程度 | 应对措施 |
-|---------|---------|------|---------|---------|
-| 市场风险 | 大盘系统性下跌 | 低/中/高 | 低/中/高 | 设置止损 |
-| 行业风险 | 商品价格波动 | 低/中/高 | 低/中/高 | 分散配置 |
-| 公司风险 | 业绩不及预期 | 低/中/高 | 低/中/高 | 跟踪季报 |
+| 风险类型 | 风险描述（具体化） | 概率 | 影响程度 | 应对措施 |
+|---------|-------------------|------|---------|---------|
+| 市场风险 | 大盘系统性下跌，沪指跌破XX点 | 低/中/高 | 低/中/高 | 跌破XX元止损 |
+| 行业风险 | XX行业政策变化/周期下行 | 低/中/高 | 低/中/高 | 分散配置 |
+| 公司风险 | 季报业绩不及预期/资产质量恶化 | 低/中/高 | 低/中/高 | 跟踪季报 |
+| 流动性风险 | 融资盘集中平仓/资金持续流出 | 低/中/高 | 低/中/高 | 监控融资余额 |
 
 ### 5. 关键监测指标
 
-列出投资者应持续关注的关键指标和事件：
-- 下一财报发布日期（如有）
-- 重要股东会议/增减持公告
-- 行业政策变化节点
-- 技术突破/跌破关键点位
+1. **宏观指标**：下月PMI发布日（关注是否回到50以上）
+2. **公司指标**：下一财报发布日期（重点关注XX指标）
+3. **资金指标**：全口径资金流向、融资余额变化趋势
+4. **技术点位**：
+   - 向上确认：放量站稳XX元
+   - 向下警示：跌破XX元
 
 ### 6. 历史决策回顾（仅当有上次决策反思时）
 
@@ -105,18 +283,18 @@ CONSOLIDATION_SYSTEM_PROMPT = '''您是一位资深的A股投资研究总监，�
 ---
 
 ## 格式要求
-- 使用 Markdown 格式
-- 数据引用需标明来源报告（如：据基本面分析，PE为18.64）
+- 使用 Markdown 格式（不要在外层包裹 ```markdown）
+- **数据引用格式**：所有数据必须标明来源，格式为「指标=数值（据XX报告）」
 - 观点需有数据支撑，避免空泛表述
 - 语言专业但易于理解
 - 建议必须具体、可操作，避免模糊表述
 
 ## 重要原则
-1. **客观中立**：综合多方观点，不偏向单一分析师意见
+1. **量化优先**：所有结论必须有数据支撑，能算的必须算（盈亏比、估值推导等）
 2. **逻辑自洽**：最终结论必须与各维度分析相符，不能自相矛盾
-3. **风险优先**：充分揭示风险，宁可保守也不过度乐观
-4. **可执行性**：建议必须具体到价位、仓位、时机
-5. **专业严谨**：数据准确引用，表述规范专业
+3. **条件触发**：入场/止损条件必须是可验证的具体条件，而非模糊描述
+4. **风险收益平衡**：既要揭示风险，也要识别机会。错过低估机会和买入高估股票都是决策失误
+5. **可执行性**：建议必须具体到价位、仓位、时机、触发条件
 '''
 
 
@@ -135,42 +313,72 @@ def _extract_decision_info(final_decision: str, consolidation_report: str) -> Di
         "position_size": None,
     }
 
-    # 提取决策类型（中文和英文分开处理）
-    decision_text = final_decision + " " + consolidation_report
-    decision_text_upper = decision_text.upper()
+    # 1. 先尝试精确匹配投资评级行
+    rating_patterns = [
+        r'投资评级[：:]\s*【([^】]+)】',     # 投资评级：【卖出】
+        r'投资评级[：:]\s*([^\n（(]+)',      # 投资评级：卖出 或 投资评级：卖出（Reduce）
+    ]
 
-    # 检查中文决策词（优先级从高到低）
-    if "强烈买入" in decision_text:
-        info["decision_type"] = "STRONG_BUY"
-        info["confidence"] = 0.9
-    elif "强烈卖出" in decision_text:
-        info["decision_type"] = "STRONG_SELL"
-        info["confidence"] = 0.9
-    elif "买入" in decision_text and "强烈" not in decision_text:
-        info["decision_type"] = "BUY"
-        info["confidence"] = 0.7
-    elif "卖出" in decision_text and "强烈" not in decision_text:
-        info["decision_type"] = "SELL"
-        info["confidence"] = 0.7
-    elif "减持" in decision_text:
-        info["decision_type"] = "REDUCE"
-        info["confidence"] = 0.6
-    elif "持有" in decision_text:
-        info["decision_type"] = "HOLD"
-        info["confidence"] = 0.5
-    # 英文决策词
-    elif "STRONG BUY" in decision_text_upper:
-        info["decision_type"] = "STRONG_BUY"
-        info["confidence"] = 0.9
-    elif "BUY" in decision_text_upper:
-        info["decision_type"] = "BUY"
-        info["confidence"] = 0.7
-    elif "SELL" in decision_text_upper:
-        info["decision_type"] = "SELL"
-        info["confidence"] = 0.7
-    elif "HOLD" in decision_text_upper:
-        info["decision_type"] = "HOLD"
-        info["confidence"] = 0.5
+    rating_text = ""
+    for pattern in rating_patterns:
+        match = re.search(pattern, consolidation_report)
+        if match:
+            rating_text = match.group(1).strip()
+            # 排除包含斜杠的选项列表（如"强烈买入/买入/持有"）
+            if '/' not in rating_text:
+                break
+            rating_text = ""
+
+    # 2. 在提取的评级文本中判断决策类型（调整顺序：卖出优先）
+    if rating_text:
+        rating_lower = rating_text.lower()
+        if "强烈卖出" in rating_text:
+            info["decision_type"] = "STRONG_SELL"
+            info["confidence"] = 0.9
+        elif "强烈买入" in rating_text:
+            info["decision_type"] = "STRONG_BUY"
+            info["confidence"] = 0.9
+        elif "卖出" in rating_text or "sell" in rating_lower:
+            info["decision_type"] = "SELL"
+            info["confidence"] = 0.7
+        elif "减持" in rating_text or "reduce" in rating_lower:
+            info["decision_type"] = "REDUCE"
+            info["confidence"] = 0.6
+        elif "买入" in rating_text or "buy" in rating_lower:
+            info["decision_type"] = "BUY"
+            info["confidence"] = 0.7
+        elif "持有" in rating_text or "hold" in rating_lower:
+            info["decision_type"] = "HOLD"
+            info["confidence"] = 0.5
+
+    # 3. 如果精确匹配失败，降级到全文搜索（原有逻辑）
+    if info["decision_type"] == "HOLD" and not rating_text:
+        decision_text = final_decision + " " + consolidation_report
+        decision_text_upper = decision_text.upper()
+
+        # 注意顺序：卖出相关优先检查
+        if "强烈卖出" in decision_text:
+            info["decision_type"] = "STRONG_SELL"
+            info["confidence"] = 0.9
+        elif "强烈买入" in decision_text:
+            info["decision_type"] = "STRONG_BUY"
+            info["confidence"] = 0.9
+        elif "STRONG SELL" in decision_text_upper:
+            info["decision_type"] = "STRONG_SELL"
+            info["confidence"] = 0.9
+        elif "STRONG BUY" in decision_text_upper:
+            info["decision_type"] = "STRONG_BUY"
+            info["confidence"] = 0.9
+        # 中文检查卖出优先
+        elif "减持" in decision_text:
+            info["decision_type"] = "REDUCE"
+            info["confidence"] = 0.6
+        elif "卖出" in decision_text and "买入" not in decision_text:
+            info["decision_type"] = "SELL"
+            info["confidence"] = 0.7
+        elif "买入" in decision_text and "卖出" not in decision_text:
+            info["decision_type"] = "BUY"
+            info["confidence"] = 0.7
 
     # 尝试提取目标价
     target_match = re.search(r'目标价[位]?[：:]\s*(\d+\.?\d*)', consolidation_report)
@@ -262,6 +470,27 @@ def create_consolidation_analyst(llm, decision_memory=None):
             name_match = re.search(r'名称[：:]\s*(\S+)', market_report)
             if name_match:
                 stock_name = name_match.group(1)
+
+        # ========== 0. 自动追踪历史决策结果 ==========
+        current_price = _extract_current_price(market_report)
+        if current_price:
+            logger.info(f"[Memory] 提取当前价格: {current_price}")
+
+        if decision_memory is not None and current_price is not None:
+            try:
+                tracking_result = _auto_update_past_outcomes(
+                    memory=decision_memory,
+                    ticker=ticker,
+                    current_date=trade_date,
+                    current_price=current_price
+                )
+                if tracking_result["updated"] > 0:
+                    logger.info(
+                        f"[Memory] 自动追踪完成: 更新 {tracking_result['updated']} 条, "
+                        f"跳过 {tracking_result['skipped']} 条, 错误 {tracking_result['errors']} 条"
+                    )
+            except Exception as e:
+                logger.warning(f"[Memory] 自动追踪历史决策失败: {e}")
 
         # ========== 1. 查询历史决策 ==========
         previous_decision_reflection = "首次分析此股票，无历史决策记录"

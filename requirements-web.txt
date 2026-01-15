@@ -1,0 +1,11 @@
+# TradingAgents Chatbot Web 依赖
+# pip install -r requirements-web.txt
+
+# Web 框架
+streamlit>=1.30.0
+
+# 已在主 requirements.txt 中的依赖（无需重复安装）:
+# langchain
+# langgraph
+# openai
+# tushare

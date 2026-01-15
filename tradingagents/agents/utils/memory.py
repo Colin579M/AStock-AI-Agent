@@ -19,6 +19,41 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def get_historical_price(ticker: str, date: str) -> Optional[float]:
+    """
+    获取指定日期的股票收盘价
+
+    Args:
+        ticker: 股票代码 (如 "600036")
+        date: 日期 (YYYY-MM-DD 格式)
+
+    Returns:
+        float: 收盘价，获取失败返回 None
+    """
+    try:
+        from tradingagents.dataflows.tushare_utils import get_pro_api, convert_stock_code
+
+        # 转换日期格式 YYYY-MM-DD -> YYYYMMDD
+        date_formatted = date.replace("-", "")
+
+        # 转换股票代码为tushare格式 (如 600036 -> 600036.SH)
+        ts_code = convert_stock_code(ticker)
+
+        # 获取 tushare pro api
+        pro = get_pro_api()
+
+        # 获取日线数据
+        df = pro.daily(ts_code=ts_code, trade_date=date_formatted)
+
+        if df is not None and not df.empty:
+            return float(df.iloc[0]['close'])
+
+        return None
+    except Exception as e:
+        logger.warning(f"获取 {ticker} 在 {date} 的历史价格失败: {e}")
+        return None
+
+
 def _is_valid_api_key(key: Optional[str]) -> bool:
     """Check if an API key is valid (not empty and not a placeholder)"""
     if not key:
@@ -42,6 +77,7 @@ class FinancialSituationMemory:
     def __init__(self, name, config):
         self.config = config
         self.llm_provider = config.get("llm_provider", "openai").lower()
+        self._disabled = False  # Memory 功能是否被禁用
 
         # Configure embedding model and client based on LLM provider
         if (self.llm_provider == "dashscope" or
@@ -96,12 +132,46 @@ class FinancialSituationMemory:
                     f"Current DASHSCOPE_API_KEY: {'[placeholder]' if dashscope_key else '[not set]'}\n"
                     f"Current OPENAI_API_KEY: {'[placeholder]' if openai_key else '[not set]'}"
                 )
-        elif config["backend_url"] == "http://localhost:11434/v1":
+        elif config.get("backend_url") and "deepseek" in config.get("backend_url", "").lower():
+            # DeepSeek 不支持 Embeddings API，需要使用其他服务
+            dashscope_key = os.getenv('DASHSCOPE_API_KEY')
+            openai_embedding_key = os.getenv('OPENAI_EMBEDDING_API_KEY')  # 独立的 OpenAI Embedding Key
+
+            if DASHSCOPE_AVAILABLE and _is_valid_api_key(dashscope_key):
+                # 使用 DashScope Embeddings（国内可访问）
+                self.embedding = "text-embedding-v3"
+                self.client = None
+                dashscope.api_key = dashscope_key
+                logger.info("DeepSeek 模式: 使用 DashScope embedding 服务")
+            elif _is_valid_api_key(openai_embedding_key):
+                # 使用独立的 OpenAI Embedding Key
+                self.embedding = "text-embedding-3-small"
+                self.client = OpenAI(api_key=openai_embedding_key)
+                logger.info("DeepSeek 模式: 使用独立 OpenAI embedding 服务")
+            else:
+                # 禁用 Memory 功能，使用空操作
+                logger.warning(
+                    "DeepSeek 不支持 Embeddings API，Memory 功能已禁用。\n"
+                    "建议配置以下任一环境变量以启用 Memory 功能：\n"
+                    "1. DASHSCOPE_API_KEY（推荐，国内可访问）\n"
+                    "2. OPENAI_EMBEDDING_API_KEY（需要能访问 OpenAI）"
+                )
+                self.embedding = None
+                self.client = None
+                self._disabled = True
+        elif config.get("backend_url") == "http://localhost:11434/v1":
             self.embedding = "nomic-embed-text"
             self.client = OpenAI(base_url=config["backend_url"])
         else:
             self.embedding = "text-embedding-3-small"
             self.client = OpenAI(base_url=config["backend_url"])
+
+        # 如果 Memory 功能被禁用，跳过 ChromaDB 初始化
+        if self._disabled:
+            self.chroma_client = None
+            self.situation_collection = None
+            logger.info("Memory 功能已禁用，跳过 ChromaDB 初始化")
+            return
 
         # 配置持久化存储路径
         chroma_path = config.get(
@@ -109,20 +179,41 @@ class FinancialSituationMemory:
             os.path.join(os.path.expanduser("~"), "Documents", "TradingAgents", "chroma_db")
         )
 
-        # 确保目录存在
-        os.makedirs(chroma_path, exist_ok=True)
+        # 初始化 ChromaDB
+        try:
+            # 确保目录存在
+            os.makedirs(chroma_path, exist_ok=True)
 
-        # 使用持久化客户端（数据会保存到磁盘，程序重启后不丢失）
-        self.chroma_client = chromadb.PersistentClient(path=chroma_path)
+            # 使用持久化客户端（数据会保存到磁盘，程序重启后不丢失）
+            self.chroma_client = chromadb.PersistentClient(path=chroma_path)
 
-        # 获取或创建集合
-        self.situation_collection = self.chroma_client.get_or_create_collection(name=name)
+            # 获取或创建集合
+            self.situation_collection = self.chroma_client.get_or_create_collection(name=name)
+        except PermissionError as e:
+            logger.error(f"ChromaDB 初始化失败：无权限访问目录 {chroma_path}: {e}")
+            raise ValueError(f"无法初始化 Memory 系统：权限不足。请检查目录权限: {chroma_path}")
+        except Exception as e:
+            logger.error(f"ChromaDB 初始化失败: {e}")
+            raise ValueError(f"Memory 系统初始化失败: {e}")
+
+    def _safe_json_dumps(self, obj: Any) -> str:
+        """安全的 JSON 序列化，处理不可序列化的对象"""
+        if obj is None:
+            return "{}"
+        try:
+            return json.dumps(obj, default=str, ensure_ascii=False)
+        except (TypeError, ValueError) as e:
+            logger.warning(f"JSON 序列化失败: {e}，使用空字典")
+            return "{}"
 
     def get_embedding(self, text):
         """Get embedding for a text using the configured provider
 
         对于超长文本，使用分块嵌入后取平均的方式处理
         """
+        # 如果 Memory 功能被禁用，返回空列表
+        if self._disabled:
+            return []
 
         # text-embedding-3-small 限制 8191 tokens
         # 保守估计：中文 1字符 ≈ 2 tokens
@@ -177,6 +268,10 @@ class FinancialSituationMemory:
 
     def add_situations(self, situations_and_advice):
         """Add financial situations and their corresponding advice. Parameter is a list of tuples (situation, rec)"""
+        # 如果 Memory 功能被禁用，直接返回
+        if self._disabled:
+            logger.debug("Memory 功能已禁用，跳过 add_situations")
+            return
 
         situations = []
         advice = []
@@ -225,6 +320,11 @@ class FinancialSituationMemory:
         Returns:
             str: 记录ID，用于后续更新outcome
         """
+        # 如果 Memory 功能被禁用，返回占位 ID
+        if self._disabled:
+            logger.debug("Memory 功能已禁用，跳过 add_decision_with_context")
+            return f"{ticker}_{decision_date}_disabled"
+
         # 检查当天是否已有该股票的记录
         existing_id = self._find_existing_record(ticker, decision_date)
 
@@ -250,7 +350,7 @@ class FinancialSituationMemory:
             "actual_return": 0.0,  # Will be updated with actual return
             "outcome_category": "",  # "profit", "loss", "breakeven"
             "days_held": 0,  # Will be updated with actual days held
-            "extra_context": json.dumps(extra_context or {})
+            "extra_context": self._safe_json_dumps(extra_context)
         }
 
         embedding = self.get_embedding(situation)
@@ -287,6 +387,9 @@ class FinancialSituationMemory:
         Returns:
             str or None: 如果存在返回记录ID，否则返回None
         """
+        if self._disabled:
+            return None
+
         try:
             # 获取所有记录的metadata
             all_records = self.situation_collection.get(include=["metadatas"])
@@ -326,6 +429,10 @@ class FinancialSituationMemory:
         Returns:
             bool: 是否更新成功
         """
+        if self._disabled:
+            logger.debug("Memory 功能已禁用，跳过 update_outcome")
+            return False
+
         try:
             # Get existing record
             result = self.situation_collection.get(
@@ -390,6 +497,10 @@ class FinancialSituationMemory:
         Returns:
             List[Dict]: 匹配的记忆列表
         """
+        # 如果 Memory 功能被禁用，返回空列表
+        if self._disabled:
+            return []
+
         query_embedding = self.get_embedding(current_situation)
 
         # Build where clause for filtering
@@ -454,6 +565,9 @@ class FinancialSituationMemory:
         Returns:
             Dict: 性能统计信息
         """
+        if self._disabled:
+            return {"total_decisions": 0, "message": "Memory 功能已禁用"}
+
         try:
             # Get all records with outcomes
             all_records = self.situation_collection.get(
@@ -579,6 +693,18 @@ class FinancialSituationMemory:
             "errors": []
         }
 
+        # 如果 Memory 功能被禁用，返回禁用状态
+        if self._disabled:
+            health["status"] = "disabled"
+            health["checks"]["memory_disabled"] = {
+                "status": "disabled",
+                "reason": "DeepSeek 不支持 Embeddings API，Memory 功能已禁用"
+            }
+            health["warnings"].append(
+                "Memory 功能已禁用。建议配置 DASHSCOPE_API_KEY 或 OPENAI_EMBEDDING_API_KEY"
+            )
+            return health
+
         # 1. 检查ChromaDB连接
         try:
             collections = self.chroma_client.list_collections()
@@ -688,6 +814,9 @@ class FinancialSituationMemory:
         Returns:
             Dict: 清理结果统计
         """
+        if self._disabled:
+            return {"total_before": 0, "deleted": 0, "total_after": 0, "message": "Memory 功能已禁用"}
+
         from datetime import timedelta
 
         result = {
@@ -756,6 +885,10 @@ class FinancialSituationMemory:
                 - actual_return: 实际收益 (如果有)
                 - outcome_category: 结果分类 (profit/loss/breakeven)
         """
+        # 如果 Memory 功能被禁用，返回空列表
+        if self._disabled:
+            return []
+
         # 边界检查：如果集合为空，直接返回空列表
         if self.situation_collection.count() == 0:
             return []
@@ -775,8 +908,20 @@ class FinancialSituationMemory:
         if not results or not results.get("documents") or not results["documents"][0]:
             return []
 
+        # 验证返回数据的一致性
+        docs = results["documents"][0]
+        metadatas = results.get("metadatas", [[]])[0]
+        distances = results.get("distances", [[]])[0]
+
+        if len(docs) != len(metadatas) or len(docs) != len(distances):
+            logger.warning(f"ChromaDB 返回数据长度不一致: docs={len(docs)}, metadatas={len(metadatas)}, distances={len(distances)}")
+            # 使用最小长度，避免 IndexError
+            min_len = min(len(docs), len(metadatas), len(distances))
+        else:
+            min_len = len(docs)
+
         matched_results = []
-        for i in range(len(results["documents"][0])):
+        for i in range(min_len):
             metadata = results["metadatas"][0][i]
 
             # 如果指定了排除日期，跳过该日期的记录

@@ -9,6 +9,175 @@ import pandas as pd
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 import traceback
+import threading
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# 全 A 股数据缓存（排行榜等功能使用）
+# ============================================================================
+
+class StockDataCache:
+    """A股实时行情缓存，避免重复调用耗时 API"""
+
+    def __init__(self, ttl_seconds: int = 300):  # 默认5分钟缓存
+        self._cache = None
+        self._cache_time = None
+        self._ttl = ttl_seconds
+        self._lock = threading.Lock()
+
+    def get_all_stocks(self) -> pd.DataFrame:
+        """获取全 A 股实时行情（带缓存）"""
+        with self._lock:
+            now = datetime.now()
+
+            # 检查缓存是否有效
+            if self._cache is not None and self._cache_time is not None:
+                age = (now - self._cache_time).total_seconds()
+                if age < self._ttl:
+                    logger.debug(f"使用缓存数据 (age={age:.1f}s)")
+                    return self._cache.copy()
+
+            # 缓存过期或不存在，重新获取
+            logger.info("获取全 A 股实时行情...")
+            try:
+                df = ak.stock_zh_a_spot_em()
+                if df is not None and not df.empty:
+                    self._cache = df
+                    self._cache_time = now
+                    logger.info(f"缓存更新成功，共 {len(df)} 只股票")
+                    return df.copy()
+            except Exception as e:
+                logger.error(f"获取 A 股数据失败: {e}")
+                # 如果有旧缓存，返回旧数据
+                if self._cache is not None:
+                    logger.warning("使用过期缓存数据")
+                    return self._cache.copy()
+
+            return pd.DataFrame()
+
+    def clear(self):
+        """清除缓存"""
+        with self._lock:
+            self._cache = None
+            self._cache_time = None
+
+
+# 全局缓存实例
+_stock_cache = StockDataCache(ttl_seconds=300)  # 5分钟缓存
+
+# 预热状态标记
+_cache_prewarm_started = False
+_cache_prewarm_thread = None
+
+
+def get_cached_stock_data() -> pd.DataFrame:
+    """获取缓存的 A 股数据"""
+    return _stock_cache.get_all_stocks()
+
+
+def prewarm_stock_cache() -> bool:
+    """
+    预热股票数据缓存（同步调用）
+
+    Returns:
+        bool: 是否成功
+    """
+    try:
+        logger.info("开始预热 A 股数据缓存...")
+        df = _stock_cache.get_all_stocks()
+        if df is not None and not df.empty:
+            logger.info(f"A 股数据缓存预热完成，共 {len(df)} 只股票")
+            return True
+        return False
+    except Exception as e:
+        logger.warning(f"缓存预热失败: {e}")
+        return False
+
+
+def prewarm_stock_cache_async():
+    """
+    后台异步预热股票数据缓存
+
+    在后台线程中预热缓存，不阻塞主线程。
+    """
+    import threading
+    global _cache_prewarm_started, _cache_prewarm_thread
+
+    if _cache_prewarm_started:
+        return  # 已经在预热中
+
+    _cache_prewarm_started = True
+
+    def _prewarm():
+        try:
+            prewarm_stock_cache()
+        except Exception as e:
+            logger.warning(f"后台缓存预热失败: {e}")
+
+    _cache_prewarm_thread = threading.Thread(target=_prewarm, daemon=True)
+    _cache_prewarm_thread.start()
+    logger.info("后台缓存预热已启动")
+
+
+# 常见股票名称别名/错别字映射
+STOCK_NAME_ALIASES = {
+    # 常见简称
+    "茅台": "贵州茅台",
+    "五粮液": "五粮液",
+    "比亚迪": "比亚迪",
+    "宁德": "宁德时代",
+    "招行": "招商银行",
+    "平安": "中国平安",
+    "腾讯": None,  # 不在A股
+    "阿里": None,  # 不在A股
+    "阿里巴巴": None,  # 不在A股
+    # 常见错别字
+    "毛台": "贵州茅台",
+    "贵州毛台": "贵州茅台",
+    "宁得时代": "宁德时代",
+    "宁德时代": "宁德时代",
+    "比亚笛": "比亚迪",
+    "招商银行": "招商银行",
+    "招商银航": "招商银行",
+    "东方财付": "东方财富",
+}
+
+
+def fuzzy_match_stock_name(query: str) -> Optional[str]:
+    """
+    模糊匹配股票名称，纠正错别字
+
+    Args:
+        query: 用户输入的查询（可能包含错别字）
+
+    Returns:
+        匹配到的股票名称，或 None
+    """
+    # 先检查别名表
+    for alias, real_name in STOCK_NAME_ALIASES.items():
+        if alias in query:
+            return real_name
+
+    # 如果没有匹配，尝试从缓存数据中模糊搜索
+    df = get_cached_stock_data()
+    if df is None or df.empty:
+        return None
+
+    # 检查完全匹配
+    if '名称' in df.columns:
+        exact_match = df[df['名称'] == query]
+        if not exact_match.empty:
+            return query
+
+        # 部分匹配
+        partial_match = df[df['名称'].str.contains(query, na=False)]
+        if not partial_match.empty:
+            return partial_match.iloc[0]['名称']
+
+    return None
 
 
 # ============================================================================
@@ -486,6 +655,501 @@ def get_china_money_flow(stock_code: str) -> str:
 
     except Exception as e:
         return f"获取资金流向时发生错误: {str(e)}\n{traceback.format_exc()}"
+
+
+# ============================================================================
+# 阶段 4：北向资金数据获取 (替代 Tushare 已停更的接口)
+# ============================================================================
+
+def get_hsgt_flow() -> str:
+    """
+    获取沪深港通资金流向（北向资金整体流向）
+
+    注意：2024年8月19日起，交易所调整信息披露机制，
+    整体北向资金流向数据已停止实时披露，但历史数据仍可查询。
+
+    Returns:
+        str: 格式化的北向资金流向数据
+    """
+    try:
+        result_parts = []
+        result_parts.append("# 北向资金流向 (AKShare)\n")
+
+        # 1. 获取北向资金历史流向
+        try:
+            df = ak.stock_hsgt_hist_em(symbol="北向资金")
+            if df is not None and not df.empty:
+                # 筛选有效数据（非NaN）
+                df_valid = df[df['当日成交净买额'].notna()]
+
+                if not df_valid.empty:
+                    result_parts.append("## 北向资金历史流向（最近有效数据）\n")
+                    # 取最近10条有效数据
+                    df_recent = df_valid.tail(10)
+                    cols = ['日期', '当日成交净买额', '买入成交额', '卖出成交额', '历史累计净买额']
+                    available_cols = [c for c in cols if c in df_recent.columns]
+                    result_parts.append(df_recent[available_cols].to_markdown(index=False))
+                    result_parts.append("\n")
+
+                    # 添加最新日期说明
+                    latest_date = df_valid['日期'].iloc[-1]
+                    result_parts.append(f"\n**注意**: 数据截止到 {latest_date}，之后因交易所政策调整已停止披露整体流向。\n")
+                else:
+                    result_parts.append("## 北向资金整体流向\n")
+                    result_parts.append("⚠️ 2024年8月19日起，交易所已停止披露北向资金整体流向数据。\n")
+                    result_parts.append("请查看下方的持股排行或个股持股数据。\n")
+        except Exception as e:
+            result_parts.append(f"北向资金历史流向获取失败: {str(e)}\n")
+
+        # 2. 获取北向资金持股排行（最新）
+        try:
+            df_hold = ak.stock_hsgt_hold_stock_em(market="北向", indicator="今日排行")
+            if df_hold is not None and not df_hold.empty:
+                result_parts.append("\n## 北向资金持股排行（今日）\n")
+                # 取前15名
+                df_top = df_hold.head(15)
+                cols = ['代码', '名称', '今日收盘价', '今日持股-市值', '今日增持估计-市值', '今日持股-占流通股比', '日期']
+                available_cols = [c for c in cols if c in df_top.columns]
+                result_parts.append(df_top[available_cols].to_markdown(index=False))
+                result_parts.append("\n")
+
+                # 计算整体统计
+                total_value = df_hold['今日持股-市值'].sum() if '今日持股-市值' in df_hold.columns else 0
+                total_change = df_hold['今日增持估计-市值'].sum() if '今日增持估计-市值' in df_hold.columns else 0
+                result_parts.append(f"\n**统计**: 北向资金总持股市值约 {total_value/10000:.2f} 亿元")
+                if total_change != 0:
+                    direction = "增持" if total_change > 0 else "减持"
+                    result_parts.append(f"，今日估计{direction} {abs(total_change)/10000:.2f} 亿元")
+                result_parts.append("\n")
+        except Exception as e:
+            result_parts.append(f"北向持股排行获取失败: {str(e)}\n")
+
+        return "\n".join(result_parts)
+
+    except Exception as e:
+        return f"获取北向资金流向时发生错误: {str(e)}\n{traceback.format_exc()}"
+
+
+def get_hsgt_top10(trade_date: Optional[str] = None) -> str:
+    """
+    获取北向资金十大成交股/持股股
+
+    Args:
+        trade_date: 交易日期 YYYYMMDD（暂不使用，API返回最新数据）
+
+    Returns:
+        str: 格式化的北向资金十大持股数据
+    """
+    try:
+        result_parts = []
+        result_parts.append("# 北向资金十大持股 (AKShare)\n")
+
+        # 获取北向资金持股排行
+        try:
+            df = ak.stock_hsgt_hold_stock_em(market="北向", indicator="今日排行")
+            if df is not None and not df.empty:
+                result_parts.append("## 北向资金持股市值前10\n")
+                df_top10 = df.head(10)
+                cols = ['代码', '名称', '今日收盘价', '今日涨跌幅', '今日持股-市值',
+                       '今日持股-占流通股比', '今日增持估计-市值', '所属板块', '日期']
+                available_cols = [c for c in cols if c in df_top10.columns]
+                result_parts.append(df_top10[available_cols].to_markdown(index=False))
+                result_parts.append("\n")
+
+                # 数据日期
+                if '日期' in df.columns:
+                    result_parts.append(f"\n数据日期: {df['日期'].iloc[0]}\n")
+        except Exception as e:
+            result_parts.append(f"北向持股排行获取失败: {str(e)}\n")
+
+        # 获取今日增持排行
+        try:
+            df_all = ak.stock_hsgt_hold_stock_em(market="北向", indicator="今日排行")
+            if df_all is not None and not df_all.empty and '今日增持估计-市值' in df_all.columns:
+                # 按增持金额排序
+                df_sorted = df_all.sort_values('今日增持估计-市值', ascending=False)
+                df_increase = df_sorted.head(10)
+                result_parts.append("\n## 今日北向资金增持前10\n")
+                cols = ['代码', '名称', '今日收盘价', '今日增持估计-市值', '今日增持估计-占流通股比']
+                available_cols = [c for c in cols if c in df_increase.columns]
+                result_parts.append(df_increase[available_cols].to_markdown(index=False))
+                result_parts.append("\n")
+
+                # 减持前10
+                df_decrease = df_sorted.tail(10).iloc[::-1]
+                result_parts.append("\n## 今日北向资金减持前10\n")
+                result_parts.append(df_decrease[available_cols].to_markdown(index=False))
+                result_parts.append("\n")
+        except Exception as e:
+            result_parts.append(f"增减持排行获取失败: {str(e)}\n")
+
+        return "\n".join(result_parts)
+
+    except Exception as e:
+        return f"获取北向资金十大持股时发生错误: {str(e)}\n{traceback.format_exc()}"
+
+
+def get_hsgt_individual(stock_code: str) -> str:
+    """
+    获取个股北向资金持股历史
+
+    Args:
+        stock_code: 股票代码，如 "600036"
+
+    Returns:
+        str: 格式化的个股北向资金持股数据
+    """
+    try:
+        result_parts = []
+        result_parts.append(f"# {stock_code} 北向资金持股 (AKShare)\n")
+
+        # 获取个股北向持股历史
+        try:
+            df = ak.stock_hsgt_individual_em(symbol=stock_code)
+            if df is not None and not df.empty:
+                result_parts.append("## 北向资金持股历史（近30日）\n")
+                # 取最近30条
+                df_recent = df.tail(30)
+                cols = ['持股日期', '当日收盘价', '当日涨跌幅', '持股数量', '持股市值',
+                       '持股数量占A股百分比', '今日增持股数', '今日增持资金']
+                available_cols = [c for c in cols if c in df_recent.columns]
+                result_parts.append(df_recent[available_cols].to_markdown(index=False))
+                result_parts.append("\n")
+
+                # 计算统计
+                if '持股市值' in df_recent.columns and '今日增持资金' in df_recent.columns:
+                    latest = df_recent.iloc[-1]
+                    result_parts.append(f"\n**最新持仓**: 持股市值 {latest['持股市值']/100000000:.2f} 亿元")
+                    result_parts.append(f"，占流通股 {latest.get('持股数量占A股百分比', 0):.2f}%")
+
+                    # 近期趋势
+                    recent_change = df_recent['今日增持资金'].tail(5).sum()
+                    if recent_change != 0:
+                        direction = "增持" if recent_change > 0 else "减持"
+                        result_parts.append(f"\n**近5日趋势**: {direction} {abs(recent_change)/100000000:.2f} 亿元")
+                    result_parts.append("\n")
+            else:
+                result_parts.append(f"暂无 {stock_code} 的北向资金持股数据\n")
+        except Exception as e:
+            result_parts.append(f"个股北向持股获取失败: {str(e)}\n")
+
+        # 在持股排行中查找该股票
+        try:
+            df_rank = ak.stock_hsgt_hold_stock_em(market="北向", indicator="今日排行")
+            if df_rank is not None and not df_rank.empty:
+                stock_row = df_rank[df_rank['代码'] == stock_code]
+                if not stock_row.empty:
+                    result_parts.append("\n## 今日持股排名\n")
+                    rank = stock_row.index[0] + 1
+                    result_parts.append(f"在北向资金持股排行中位列第 **{rank}** 名\n")
+                    result_parts.append(stock_row.to_markdown(index=False))
+                    result_parts.append("\n")
+        except Exception:
+            pass
+
+        return "\n".join(result_parts)
+
+    except Exception as e:
+        return f"获取个股北向资金持股时发生错误: {str(e)}\n{traceback.format_exc()}"
+
+
+# ============================================================================
+# 阶段 5：A股排行榜数据
+# ============================================================================
+
+def get_stock_rank(
+    rank_type: str = "涨幅榜",
+    period: str = "今日",
+    market: str = "全部",
+    top_n: int = 20
+) -> str:
+    """
+    获取 A 股排行榜数据
+
+    Args:
+        rank_type: 排行类型 - "涨幅榜", "跌幅榜", "成交额榜", "换手率榜", "资金流入榜", "资金流出榜"
+        period: 时间周期 - "今日", "5日", "10日", "20日"
+        market: 市场范围 - "全部", "沪市", "深市", "创业板", "科创板"
+        top_n: 返回前N名，默认20
+
+    Returns:
+        str: 格式化的排行榜数据
+    """
+    logger.info(f"[get_stock_rank] 开始: rank_type={rank_type}, period={period}, market={market}, top_n={top_n}")
+    print(f"[DEBUG] get_stock_rank 被调用: rank_type={rank_type}")  # 强制打印到控制台
+    try:
+        result_parts = []
+        result_parts.append(f"# A股{rank_type} ({period})\n")
+
+        # 优先使用 tushare（快速），回退到 akshare（慢）
+        try:
+            print("[DEBUG] 尝试导入 tushare...")
+            from tradingagents.dataflows.tushare_utils import get_all_stocks_daily
+            print("[DEBUG] 导入成功，调用 get_all_stocks_daily()...")
+            df = get_all_stocks_daily()
+            print(f"[DEBUG] tushare 返回: {len(df) if df is not None else 0} 行")
+            if df is not None and not df.empty:
+                logger.info(f"[get_stock_rank] 使用 tushare 数据源: {len(df)} 只股票")
+                print(f"[DEBUG] 使用 tushare 数据源: {len(df)} 只股票")
+            else:
+                raise ValueError("tushare 数据为空")
+        except Exception as e:
+            import traceback
+            logger.warning(f"[get_stock_rank] tushare 获取失败，回退到 akshare: {e}")
+            print(f"[DEBUG] tushare 失败: {e}")
+            print(f"[DEBUG] 异常详情:\n{traceback.format_exc()}")
+            df = get_cached_stock_data()
+
+        if df is None or df.empty:
+            return "获取A股行情数据失败"
+
+        # 市场筛选
+        if market == "沪市":
+            df = df[df['代码'].str.startswith('6')]
+        elif market == "深市":
+            df = df[df['代码'].str.startswith(('0', '3'))]
+        elif market == "创业板":
+            df = df[df['代码'].str.startswith('3')]
+        elif market == "科创板":
+            df = df[df['代码'].str.startswith('68')]
+
+        # 排除 ST 股票
+        df = df[~df['名称'].str.contains('ST|退', na=False)]
+
+        # 根据排行类型排序
+        if rank_type == "涨幅榜":
+            if period == "今日":
+                sort_col = '涨跌幅'
+            elif period == "5日":
+                sort_col = '5日涨跌幅' if '5日涨跌幅' in df.columns else '涨跌幅'
+            elif period == "10日":
+                sort_col = '10日涨跌幅' if '10日涨跌幅' in df.columns else '涨跌幅'
+            else:
+                sort_col = '涨跌幅'
+            df_sorted = df.nlargest(top_n, sort_col)
+            display_cols = ['代码', '名称', sort_col, '最新价', '成交额', '换手率']
+
+        elif rank_type == "跌幅榜":
+            sort_col = '涨跌幅'
+            df_sorted = df.nsmallest(top_n, sort_col)
+            display_cols = ['代码', '名称', '涨跌幅', '最新价', '成交额', '换手率']
+
+        elif rank_type == "成交额榜":
+            df_sorted = df.nlargest(top_n, '成交额')
+            display_cols = ['代码', '名称', '成交额', '涨跌幅', '最新价', '换手率']
+
+        elif rank_type == "换手率榜":
+            df_sorted = df.nlargest(top_n, '换手率')
+            display_cols = ['代码', '名称', '换手率', '涨跌幅', '最新价', '成交额']
+
+        elif rank_type in ["资金流入榜", "资金流出榜"]:
+            # 使用资金流向排名 API（注意：此 API 较慢，需要分页请求）
+            logger.warning(f"[诊断] 即将调用慢速 API: ak.stock_individual_fund_flow_rank(indicator={period})")
+            try:
+                indicator = "今日" if period == "今日" else period.replace("日", "日")
+                df_flow = ak.stock_individual_fund_flow_rank(indicator=indicator)
+                if df_flow is not None and not df_flow.empty:
+                    if rank_type == "资金流入榜":
+                        df_sorted = df_flow.nlargest(top_n, '主力净流入-净额')
+                    else:
+                        df_sorted = df_flow.nsmallest(top_n, '主力净流入-净额')
+                    display_cols = ['代码', '名称', '最新价', '涨跌幅', '主力净流入-净额', '主力净流入-净占比']
+                    result_parts.append(f"市场范围: {market}\n")
+                    result_parts.append(f"返回数量: 前{top_n}名\n\n")
+
+                    # 格式化金额显示
+                    if '主力净流入-净额' in df_sorted.columns:
+                        df_sorted = df_sorted.copy()
+                        df_sorted['主力净流入-净额'] = df_sorted['主力净流入-净额'].apply(
+                            lambda x: f"{x/100000000:.2f}亿" if abs(x) >= 100000000 else f"{x/10000:.0f}万"
+                        )
+
+                    available_cols = [c for c in display_cols if c in df_sorted.columns]
+                    result_parts.append(df_sorted[available_cols].to_markdown(index=False))
+                    return "\n".join(result_parts)
+            except Exception as e:
+                return f"获取资金流向排行失败: {str(e)}"
+
+        else:
+            return f"不支持的排行类型: {rank_type}"
+
+        result_parts.append(f"市场: {market} | 前{top_n}名\n")
+
+        # 紧凑格式输出（避免 markdown 表格占用太多 tokens）
+        for idx, row in df_sorted.head(top_n).iterrows():
+            code = row.get('代码', '')
+            name = row.get('名称', '')
+            price = row.get('最新价', 0)
+            change = row.get('涨跌幅', row.get(sort_col, 0)) if 'sort_col' in dir() else row.get('涨跌幅', 0)
+            amount = row.get('成交额', 0)
+            turnover = row.get('换手率', 0)
+
+            # 格式化金额
+            amount_str = f"{amount/100000000:.1f}亿" if amount >= 100000000 else f"{amount/10000:.0f}万"
+            change_str = f"+{change:.2f}%" if change > 0 else f"{change:.2f}%"
+
+            result_parts.append(f"{code} {name} {change_str} ¥{price:.2f} 成交{amount_str}")
+
+        return "\n".join(result_parts)
+
+    except Exception as e:
+        return f"获取排行榜数据时发生错误: {str(e)}\n{traceback.format_exc()}"
+
+
+def get_continuous_up_stocks(days: int = 3, top_n: int = 20) -> str:
+    """
+    获取连续上涨股票
+
+    Args:
+        days: 连涨天数，默认3天
+        top_n: 返回前N名
+
+    Returns:
+        str: 格式化的连续上涨股票列表
+    """
+    try:
+        result_parts = []
+        result_parts.append(f"# 连续上涨{days}天以上的股票\n")
+
+        # 使用同花顺连续上涨榜
+        df = ak.stock_rank_ljqd_ths()
+        if df is None or df.empty:
+            return "获取连续上涨数据失败"
+
+        # 筛选连涨天数
+        if '连涨天数' in df.columns:
+            df = df[df['连涨天数'] >= days]
+
+        df_top = df.head(top_n)
+        result_parts.append(f"共{len(df_top)}只\n")
+
+        # 紧凑格式输出
+        for _, row in df_top.iterrows():
+            code = row.get('代码', '')
+            name = row.get('名称', '')
+            price = row.get('最新价', 0)
+            days_up = row.get('连涨天数', 0)
+            total_change = row.get('累计涨幅', 0)
+            result_parts.append(f"{code} {name} 连涨{days_up}天 累计+{total_change:.1f}% ¥{price:.2f}")
+
+        return "\n".join(result_parts)
+
+    except Exception as e:
+        return f"获取连续上涨股票时发生错误: {str(e)}\n{traceback.format_exc()}"
+
+
+def get_hot_stocks(top_n: int = 20) -> str:
+    """
+    获取热门股票（基于人气榜/关注度）
+
+    Args:
+        top_n: 返回前N名
+
+    Returns:
+        str: 格式化的热门股票列表
+    """
+    try:
+        result_parts = []
+        result_parts.append(f"# 热门股票 (前{top_n})\n")
+
+        # 优先使用 tushare（快速），回退到 akshare（慢）
+        try:
+            from tradingagents.dataflows.tushare_utils import get_all_stocks_daily
+            df = get_all_stocks_daily()
+            if df is None or df.empty:
+                raise ValueError("tushare 数据为空")
+            logger.info(f"[get_hot_stocks] 使用 tushare: {len(df)} 只股票")
+        except Exception as e:
+            logger.warning(f"[get_hot_stocks] tushare 失败，回退到 akshare: {e}")
+            df = get_cached_stock_data()
+        if df is not None and not df.empty:
+            df = df[~df['名称'].str.contains('ST|退', na=False)]
+            df_top = df.nlargest(top_n, '成交额')
+            for _, row in df_top.iterrows():
+                code = row.get('代码', '')
+                name = row.get('名称', '')
+                price = row.get('最新价', 0)
+                change = row.get('涨跌幅', 0)
+                amount = row.get('成交额', 0)
+                amount_str = f"{amount/100000000:.1f}亿"
+                change_str = f"+{change:.2f}%" if change > 0 else f"{change:.2f}%"
+                result_parts.append(f"{code} {name} {change_str} ¥{price:.2f} 成交{amount_str}")
+            return "\n".join(result_parts)
+
+        # 回退到人气榜 API（较慢）
+        try:
+            df = ak.stock_rank_xstp_ths()
+            if df is not None and not df.empty:
+                df_top = df.head(top_n)
+                for _, row in df_top.iterrows():
+                    # 使用正确的列名
+                    code = row.get('股票代码', row.get('代码', ''))
+                    name = row.get('股票简称', row.get('名称', ''))
+                    price = row.get('最新价', 0)
+                    change = row.get('涨跌幅', 0)
+                    change_str = f"+{change:.2f}%" if change > 0 else f"{change:.2f}%"
+                    result_parts.append(f"{code} {name} {change_str} ¥{price:.2f}")
+                return "\n".join(result_parts)
+        except Exception:
+            pass
+
+        return "获取热门股票数据失败"
+
+    except Exception as e:
+        return f"获取热门股票时发生错误: {str(e)}\n{traceback.format_exc()}"
+
+
+# ============================================================================
+# 板块数据
+# ============================================================================
+
+def get_sector_ranking(indicator: str = "行业", top_n: int = 15) -> str:
+    """
+    获取板块涨跌幅排行
+
+    Args:
+        indicator: 板块类型，可选 "行业" / "概念" / "地域"
+        top_n: 返回前N个板块
+
+    Returns:
+        str: 格式化的板块排行数据
+    """
+    import akshare as ak
+
+    try:
+        # 获取板块实时行情
+        df = ak.stock_sector_spot(indicator=indicator)
+
+        if df is None or df.empty:
+            return f"暂无{indicator}板块数据"
+
+        # 按涨跌幅排序
+        df = df.sort_values('涨跌幅', ascending=False)
+
+        result = [f"# {indicator}板块涨跌幅排行\n\n"]
+        result.append(f"共 {len(df)} 个板块\n\n")
+
+        # 领涨板块
+        result.append("## 领涨板块\n\n")
+        for i, (_, row) in enumerate(df.head(top_n).iterrows(), 1):
+            sector_name = row.get('板块', 'N/A')
+            change_pct = row.get('涨跌幅', 0)
+            volume = row.get('总成交额', 0)
+            volume_str = f"{volume/1e8:.1f}亿" if volume > 0 else "N/A"
+            result.append(f"{i}. **{sector_name}** {change_pct:+.2f}% 成交{volume_str}\n")
+
+        # 领跌板块
+        result.append("\n## 领跌板块\n\n")
+        for i, (_, row) in enumerate(df.tail(5).iloc[::-1].iterrows(), 1):
+            sector_name = row.get('板块', 'N/A')
+            change_pct = row.get('涨跌幅', 0)
+            result.append(f"{i}. **{sector_name}** {change_pct:+.2f}%\n")
+
+        return "".join(result)
+
+    except Exception as e:
+        logger.error(f"获取{indicator}板块数据失败: {e}")
+        return f"获取{indicator}板块数据失败: {str(e)}"
 
 
 # ============================================================================

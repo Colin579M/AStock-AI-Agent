@@ -119,10 +119,10 @@ DEFAULT_CONFIG = {
     # LLM settings
     # Supported providers: "openai", "anthropic", "google", "dashscope", "ollama", "openrouter"
     # For DashScope: set llm_provider="dashscope", deep_think_llm="qwen-plus", quick_think_llm="qwen-turbo"
-    "llm_provider": "openai",
-    "deep_think_llm": "gpt-5",
-    "quick_think_llm": "gpt-5-mini",
-    "backend_url": "https://api.openai.com/v1",
+    "llm_provider": "openai",  # DeepSeek 使用 OpenAI 兼容接口
+    "deep_think_llm": "deepseek-chat",
+    "quick_think_llm": "deepseek-chat",
+    "backend_url": "https://api.deepseek.com/v1",
     # Debate and discussion settings
     "max_debate_rounds": 1,
     "max_risk_discuss_rounds": 1,

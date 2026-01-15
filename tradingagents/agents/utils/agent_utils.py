@@ -721,18 +721,19 @@ class Toolkit:
     @tool
     def get_tushare_hsgt_flow() -> str:
         """
-        ⚠️ 已停更：2024年8月19日起沪深交所调整信息披露机制，北向资金整体流向数据已停止更新。
+        使用AKShare获取沪深港通资金流向数据。
 
-        请改用以下替代工具：
-        - get_tushare_hsgt_top10: 获取每日北向资金十大成交股
-        - get_tushare_top10_holders: 通过"香港中央结算"持股比例季度变化判断外资态度
+        ⚠️ 注意：2024年8月19日起沪深交所调整信息披露机制，北向资金整体流向数据已停止更新。
+        本工具现提供：
+        1. 历史资金流向数据（截至2024-08-16）
+        2. 当前北向资金十大持股情况
 
-        注：个股北向持股明细(hk_hold)港交所自2024年8月20日起仅提供季度数据，已移除。
+        推荐使用 get_tushare_hsgt_individual 获取个股北向资金持股历史。
 
         Returns:
-            str: 数据停更说明
+            str: 北向资金流向数据及十大持股
         """
-        from tradingagents.dataflows.tushare_utils import get_hsgt_flow
+        from tradingagents.dataflows.akshare_utils import get_hsgt_flow
         return get_hsgt_flow()
 
     @staticmethod
@@ -891,18 +892,34 @@ class Toolkit:
     @staticmethod
     @tool
     def get_tushare_hsgt_top10(
-        trade_date: Annotated[str, "交易日期 YYYYMMDD 格式，可选"] = "",
+        trade_date: Annotated[str, "交易日期 YYYYMMDD 或 YYYY-MM-DD 格式，可选"] = "",
     ) -> str:
         """
-        使用Tushare获取沪深港通十大成交股，查看当日北向资金重点交易的股票。
+        使用AKShare获取北向资金十大持股股，查看北向资金重点持有的股票。
         用于判断某只股票是否进入外资关注的热门标的。
         Args:
-            trade_date (str): 交易日期 YYYYMMDD 格式，留空获取最近交易日数据
+            trade_date (str): 交易日期 YYYYMMDD 或 YYYY-MM-DD 格式，留空获取最近数据
         Returns:
-            str: 格式化的沪深港通十大成交股列表
+            str: 格式化的北向资金十大持股列表（按持股市值排序）
         """
-        from tradingagents.dataflows.tushare_utils import get_hsgt_top10
+        from tradingagents.dataflows.akshare_utils import get_hsgt_top10
         return get_hsgt_top10(trade_date if trade_date else None)
+
+    @staticmethod
+    @tool
+    def get_tushare_hsgt_individual(
+        stock_code: Annotated[str, "股票代码，如 600036, 000001"],
+    ) -> str:
+        """
+        使用AKShare获取个股北向资金持股历史，查看外资对某只股票的持股变化。
+        对于分析外资态度和持仓趋势非常有价值。
+        Args:
+            stock_code (str): 股票代码，如 600036（招商银行）
+        Returns:
+            str: 格式化的个股北向资金持股历史数据
+        """
+        from tradingagents.dataflows.akshare_utils import get_hsgt_individual
+        return get_hsgt_individual(stock_code)
 
     @staticmethod
     @tool

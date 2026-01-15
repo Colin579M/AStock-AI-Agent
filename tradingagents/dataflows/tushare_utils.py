@@ -36,14 +36,32 @@ _pro_api = None
 
 def get_tushare_token() -> str:
     """
-    获取 Tushare Token，优先从环境变量读取，其次从配置文件读取
+    获取 Tushare Token，优先从环境变量读取，其次从 .env 文件读取
     """
     # 优先环境变量
     token = os.getenv("TUSHARE_TOKEN", "")
     if token:
         return token
 
-    # 其次从配置文件读取
+    # 其次尝试从 .env 文件读取
+    try:
+        from dotenv import load_dotenv
+        import pathlib
+        # 尝试多个可能的 .env 位置
+        possible_paths = [
+            pathlib.Path(".env"),
+            pathlib.Path(__file__).parent.parent.parent / ".env",  # 项目根目录
+        ]
+        for env_path in possible_paths:
+            if env_path.exists():
+                load_dotenv(env_path)
+                token = os.getenv("TUSHARE_TOKEN", "")
+                if token:
+                    return token
+    except ImportError:
+        pass
+
+    # 再次尝试从配置文件读取
     try:
         from tradingagents.default_config import DEFAULT_CONFIG
         token = DEFAULT_CONFIG.get("tushare_token", "")
@@ -1880,3 +1898,145 @@ def get_china_market_news_tushare(date: str = None) -> str:
         result_parts.append("重大新闻接口暂不可用，请参考新闻联播内容或使用其他新闻源。\n")
 
     return "\n".join(result_parts)
+
+
+# ============================================================================
+# 全市场行情数据（用于排行榜，替代慢速的 akshare API）
+# ============================================================================
+
+import threading
+
+# 全市场数据缓存
+_market_data_cache = None
+_market_data_cache_time = None
+_market_data_cache_lock = threading.Lock()
+_MARKET_DATA_CACHE_TTL = 1800  # 30分钟缓存
+
+
+def get_all_stocks_daily(trade_date: str = None) -> pd.DataFrame:
+    """
+    获取全市场日线行情数据（带缓存）
+
+    使用 tushare 的 daily + daily_basic 接口，比 akshare 快约 50 倍。
+
+    Args:
+        trade_date: 交易日期 YYYYMMDD，默认最近交易日
+
+    Returns:
+        DataFrame 包含: 代码, 名称, 最新价, 涨跌幅, 成交额, 换手率, 市值等
+    """
+    global _market_data_cache, _market_data_cache_time
+
+    with _market_data_cache_lock:
+        now = datetime.now()
+
+        # 检查缓存
+        if _market_data_cache is not None and _market_data_cache_time is not None:
+            age = (now - _market_data_cache_time).total_seconds()
+            if age < _MARKET_DATA_CACHE_TTL:
+                logger.debug(f"[tushare] 使用缓存的全市场数据 (age={age:.0f}s)")
+                return _market_data_cache.copy()
+
+        # 获取新数据
+        logger.info("[tushare] 获取全市场行情数据...")
+        start_time = datetime.now()
+
+        try:
+            pro = get_pro_api()
+
+            # 确定交易日期
+            if not trade_date:
+                # 使用最近的交易日
+                today = datetime.now().strftime("%Y%m%d")
+                yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+                day_before = (datetime.now() - timedelta(days=2)).strftime("%Y%m%d")
+                dates_to_try = [today, yesterday, day_before]
+            else:
+                dates_to_try = [trade_date]
+
+            df_daily = None
+            df_basic = None
+            used_date = None
+
+            for date in dates_to_try:
+                try:
+                    df_daily = pro.daily(trade_date=date)
+                    if df_daily is not None and not df_daily.empty:
+                        df_basic = pro.daily_basic(trade_date=date)
+                        used_date = date
+                        break
+                except Exception:
+                    continue
+
+            if df_daily is None or df_daily.empty:
+                logger.warning("[tushare] 无法获取日线数据")
+                return pd.DataFrame()
+
+            # 获取股票名称
+            df_names = pro.stock_basic(
+                exchange='',
+                list_status='L',
+                fields='ts_code,name'
+            )
+
+            # 合并数据
+            df = df_daily.merge(df_names, on='ts_code', how='left')
+
+            if df_basic is not None and not df_basic.empty:
+                # 避免列名冲突
+                df_basic_cols = ['ts_code', 'turnover_rate', 'volume_ratio', 'pe_ttm', 'pb', 'total_mv', 'circ_mv']
+                df_basic_subset = df_basic[[c for c in df_basic_cols if c in df_basic.columns]]
+                df = df.merge(df_basic_subset, on='ts_code', how='left')
+
+            # 重命名列为中文（与 akshare 兼容）
+            column_map = {
+                'ts_code': '代码',
+                'name': '名称',
+                'close': '最新价',
+                'pct_chg': '涨跌幅',
+                'change': '涨跌额',
+                'vol': '成交量',
+                'amount': '成交额',  # 千元 → 需要转换
+                'open': '今开',
+                'high': '最高',
+                'low': '最低',
+                'pre_close': '昨收',
+                'turnover_rate': '换手率',
+                'volume_ratio': '量比',
+                'pe_ttm': '市盈率-动态',
+                'pb': '市净率',
+                'total_mv': '总市值',  # 万元
+                'circ_mv': '流通市值',  # 万元
+            }
+            df = df.rename(columns={k: v for k, v in column_map.items() if k in df.columns})
+
+            # 转换成交额单位：千元 → 元
+            if '成交额' in df.columns:
+                df['成交额'] = df['成交额'] * 1000
+
+            # 转换市值单位：万元 → 元
+            if '总市值' in df.columns:
+                df['总市值'] = df['总市值'] * 10000
+            if '流通市值' in df.columns:
+                df['流通市值'] = df['流通市值'] * 10000
+
+            # 清理代码格式（去掉 .SH/.SZ 后缀）
+            if '代码' in df.columns:
+                df['代码'] = df['代码'].str.replace(r'\.(SH|SZ|BJ)$', '', regex=True)
+
+            elapsed = (datetime.now() - start_time).total_seconds()
+            logger.info(f"[tushare] 全市场数据获取完成: {len(df)} 只股票, 耗时 {elapsed:.1f}s")
+
+            # 更新缓存
+            _market_data_cache = df
+            _market_data_cache_time = now
+
+            return df.copy()
+
+        except Exception as e:
+            logger.error(f"[tushare] 获取全市场数据失败: {e}")
+            # 如果有旧缓存，返回旧数据
+            if _market_data_cache is not None:
+                logger.warning("[tushare] 使用过期缓存数据")
+                return _market_data_cache.copy()
+            return pd.DataFrame()
