@@ -6,7 +6,10 @@ OpenAI Responses API 适配器
 
 import os
 import json
+import logging
 from typing import Any, Dict, List, Optional, Union, Sequence
+
+logger = logging.getLogger(__name__)
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
@@ -33,6 +36,7 @@ class ChatOpenAIResponses(BaseChatModel):
     reasoning_effort: str = Field(default="medium", description="推理深度: none, low, medium, high, xhigh")
     temperature: Optional[float] = Field(default=None, description="生成温度 (仅 reasoning=none 时有效)")
     max_tokens: int = Field(default=4000, description="最大生成token数")
+    timeout: int = Field(default=120, description="API 调用超时时间（秒）")
 
     # 工具配置
     tools: List[Dict[str, Any]] = Field(default_factory=list, description="绑定的工具列表")
@@ -65,7 +69,10 @@ class ChatOpenAIResponses(BaseChatModel):
         # 初始化客户端
         key_value = api_key.get_secret_value() if isinstance(api_key, SecretStr) else api_key
 
-        client_kwargs = {"api_key": key_value}
+        client_kwargs = {
+            "api_key": key_value,
+            "timeout": self.timeout  # 添加超时设置
+        }
         if self.base_url:
             client_kwargs["base_url"] = self.base_url
 
@@ -191,10 +198,17 @@ class ChatOpenAIResponses(BaseChatModel):
                 request_params["tool_choice"] = self.tool_choice
 
         # 设置推理参数
-        if self.reasoning_effort != "none":
+        # 注意：某些模型不支持 reasoning.effort 或 temperature
+        MODELS_NO_CUSTOM_TEMP = ["gpt-5-mini", "gpt-5-nano", "o1", "o1-mini", "o1-preview"]
+        MODELS_NO_REASONING = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5"]
+        model_lower = self.model.lower()
+        use_default_temp = any(m in model_lower for m in MODELS_NO_CUSTOM_TEMP)
+        no_reasoning = any(m in model_lower for m in MODELS_NO_REASONING)
+
+        if self.reasoning_effort != "none" and not no_reasoning:
             request_params["reasoning"] = {"effort": self.reasoning_effort}
-        else:
-            # 只有 reasoning=none 时才能使用 temperature
+        elif not use_default_temp:
+            # 不支持 reasoning 或 reasoning=none 时，使用 temperature
             if self.temperature is not None:
                 request_params["temperature"] = self.temperature
 
@@ -202,8 +216,16 @@ class ChatOpenAIResponses(BaseChatModel):
         if self._previous_response_id:
             request_params["previous_response_id"] = self._previous_response_id
 
+        # 检查是否是 DeepSeek 或其他不支持 Responses API 的服务
+        is_deepseek = self.base_url and "deepseek" in self.base_url.lower()
+
+        if is_deepseek:
+            # DeepSeek 只支持 Chat Completions API，直接使用
+            logger.debug("检测到 DeepSeek API，直接使用 Chat Completions")
+            return self._fallback_to_chat_completions(messages, stop, **kwargs)
+
         try:
-            # 调用 Responses API
+            # 调用 Responses API (仅 OpenAI 官方支持)
             response = self._client.responses.create(**request_params)
 
             # 保存 response_id 供下次调用
@@ -248,9 +270,13 @@ class ChatOpenAIResponses(BaseChatModel):
 
         except Exception as e:
             # 如果 Responses API 失败，回退到 Chat Completions API
-            print(f"⚠️ Responses API 调用失败: {e}")
-            print("尝试回退到 Chat Completions API...")
-            return self._fallback_to_chat_completions(messages, stop, **kwargs)
+            logger.warning(f"Responses API 调用失败: {e}")
+            logger.info("尝试回退到 Chat Completions API...")
+            try:
+                return self._fallback_to_chat_completions(messages, stop, **kwargs)
+            except Exception as fallback_error:
+                logger.error(f"Chat Completions API 回退也失败: {fallback_error}")
+                raise RuntimeError(f"所有 LLM 调用方式都已失败: {fallback_error}") from e
 
     def _fallback_to_chat_completions(
         self,
@@ -293,12 +319,20 @@ class ChatOpenAIResponses(BaseChatModel):
                 })
 
         # 构建请求参数
+        # 注意：某些模型（如 gpt-5-mini, gpt-5-nano）不支持自定义 temperature
+        MODELS_NO_CUSTOM_TEMP = ["gpt-5-mini", "gpt-5-nano", "o1", "o1-mini", "o1-preview"]
+        model_lower = self.model.lower()
+        use_default_temp = any(m in model_lower for m in MODELS_NO_CUSTOM_TEMP)
+
         request_params = {
             "model": self.model,
             "messages": chat_messages,
-            "max_completion_tokens": self.max_tokens,
-            "temperature": self.temperature if self.temperature else 0.1,
+            "max_tokens": self.max_tokens,  # 使用 max_tokens (DeepSeek 兼容)
         }
+
+        # 只有支持的模型才添加 temperature 参数
+        if not use_default_temp:
+            request_params["temperature"] = self.temperature if self.temperature else 0.1
 
         # 添加工具 (需要转换为 Chat Completions 格式)
         if self.tools:

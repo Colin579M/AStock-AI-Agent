@@ -48,14 +48,25 @@ class DatabaseCacheManager:
             mongodb_db: MongoDB数据库名
             redis_db: Redis数据库编号
         """
-        # 从配置文件获取正确的端口
+        # 从环境变量获取配置（不使用硬编码默认密码）
         mongodb_port = os.getenv("MONGODB_PORT", "27018")
         redis_port = os.getenv("REDIS_PORT", "6380")
-        mongodb_password = os.getenv("MONGODB_PASSWORD", "tradingagents123")
-        redis_password = os.getenv("REDIS_PASSWORD", "tradingagents123")
+        mongodb_password = os.getenv("MONGODB_PASSWORD", "")
+        redis_password = os.getenv("REDIS_PASSWORD", "")
 
-        self.mongodb_url = mongodb_url or os.getenv("MONGODB_URL", f"mongodb://admin:{mongodb_password}@localhost:{mongodb_port}")
-        self.redis_url = redis_url or os.getenv("REDIS_URL", f"redis://:{redis_password}@localhost:{redis_port}")
+        # 构建连接URL
+        if mongodb_password:
+            default_mongodb_url = f"mongodb://admin:{mongodb_password}@localhost:{mongodb_port}"
+        else:
+            default_mongodb_url = f"mongodb://localhost:{mongodb_port}"
+
+        if redis_password:
+            default_redis_url = f"redis://:{redis_password}@localhost:{redis_port}"
+        else:
+            default_redis_url = f"redis://localhost:{redis_port}"
+
+        self.mongodb_url = mongodb_url or os.getenv("MONGODB_URL", default_mongodb_url)
+        self.redis_url = redis_url or os.getenv("REDIS_URL", default_redis_url)
         self.mongodb_db_name = mongodb_db
         self.redis_db = redis_db
         

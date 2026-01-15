@@ -230,11 +230,10 @@ def select_thinking_agent(provider) -> str:
             ("Qwen-Max-LongContext - 超长上下文", "qwen-max-longcontext"),
         ],
         "openai": [
-            ("GPT-5 nano - 高吞吐量，简单任务", "gpt-5-nano"),
-            ("GPT-5 mini - 成本优化的推理和对话", "gpt-5-mini"),
             ("GPT-5.2 - 最佳通用模型 (推荐)", "gpt-5.2"),
             ("GPT-5.2 Pro - 更难问题，深度思考", "gpt-5.2-pro"),
-            ("GPT-5.1 Codex Max - 编码专用", "gpt-5.1-codex-max"),
+            ("GPT-5 mini - ⚠️上下文较小，可能溢出", "gpt-5-mini"),
+            ("GPT-5 nano - ⚠️上下文较小，简单任务", "gpt-5-nano"),
         ],
         "anthropic": [
             ("Claude 3.5 Haiku - 快速推理", "claude-3-5-haiku-latest"),
@@ -312,8 +311,112 @@ def select_llm_provider() -> tuple[str, str]:
     if choice is None:
         console.print("\n[red]no OpenAI backend selected. Exiting...[/red]")
         exit(1)
-    
+
     display_name, url = choice
     print(f"You selected: {display_name}\tURL: {url}")
-    
+
     return display_name, url
+
+
+def select_analysis_mode() -> str:
+    """选择分析模式：单只股票或Portfolio批量分析"""
+    from rich.console import Console
+    console = Console()
+
+    MODE_OPTIONS = [
+        ("单只股票分析 - 深入分析一只股票", "single"),
+        ("Portfolio批量分析 - 并行分析自选股组合", "portfolio"),
+    ]
+
+    choice = questionary.select(
+        "选择分析模式:",
+        choices=[
+            questionary.Choice(display, value=value) for display, value in MODE_OPTIONS
+        ],
+        instruction="\n- 使用方向键选择\n- 按 Enter 确认",
+        style=questionary.Style(
+            [
+                ("selected", "fg:cyan noinherit"),
+                ("highlighted", "fg:cyan noinherit"),
+                ("pointer", "fg:cyan noinherit"),
+            ]
+        ),
+    ).ask()
+
+    if choice is None:
+        console.print("\n[red]未选择分析模式，退出...[/red]")
+        exit(1)
+
+    return choice
+
+
+def select_portfolio(portfolio_manager) -> Optional[str]:
+    """选择要分析的Portfolio"""
+    from rich.console import Console
+    console = Console()
+
+    portfolios = portfolio_manager.list_portfolios()
+
+    if not portfolios:
+        console.print("[yellow]暂无Portfolio，请先创建[/yellow]")
+        console.print("[dim]使用命令: python -c \"from cli.main import app; app(['portfolio', 'create', '我的组合'])\"[/dim]")
+        return None
+
+    # 构建选项列表
+    choices = []
+    for p in portfolios:
+        default_mark = " ✓" if p["is_default"] else ""
+        display = f"{p['name']} ({p['stock_count']}只股票){default_mark}"
+        choices.append(questionary.Choice(display, value=p["name"]))
+
+    choice = questionary.select(
+        "选择Portfolio:",
+        choices=choices,
+        instruction="\n- 使用方向键选择\n- 按 Enter 确认",
+        style=questionary.Style(
+            [
+                ("selected", "fg:green noinherit"),
+                ("highlighted", "fg:green noinherit"),
+                ("pointer", "fg:green noinherit"),
+            ]
+        ),
+    ).ask()
+
+    if choice is None:
+        console.print("\n[red]未选择Portfolio，退出...[/red]")
+        exit(1)
+
+    return choice
+
+
+def select_parallel_workers() -> int:
+    """选择并行分析数量"""
+    from rich.console import Console
+    console = Console()
+
+    WORKER_OPTIONS = [
+        ("1 - 串行（最慢，省API）", 1),
+        ("2 - 低并发", 2),
+        ("3 - 标准（推荐）", 3),
+        ("5 - 高并发", 5),
+    ]
+
+    choice = questionary.select(
+        "并行分析数量:",
+        choices=[
+            questionary.Choice(display, value=value) for display, value in WORKER_OPTIONS
+        ],
+        instruction="\n- 并行数越高分析越快，但可能触发API限流",
+        style=questionary.Style(
+            [
+                ("selected", "fg:yellow noinherit"),
+                ("highlighted", "fg:yellow noinherit"),
+                ("pointer", "fg:yellow noinherit"),
+            ]
+        ),
+    ).ask()
+
+    if choice is None:
+        return 3  # 默认值
+
+    return choice

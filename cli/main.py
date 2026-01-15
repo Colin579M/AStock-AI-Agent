@@ -30,17 +30,33 @@ init_logging(log_level="INFO", enable_console=False, enable_file=True)
 from cli.models import AnalystType
 from cli.utils import *
 from cli.analytics import AnalyticsTracker
-from cli.data_logger import ToolDataLogger
+from tradingagents.utils.data_logger import ToolDataLogger
 from cli.decision_tracker import DecisionTracker, parse_decision_from_report, get_price_from_report
 from langchain_core.messages import ToolMessage
 
 console = Console()
 
+# Portfolio数据目录（提前定义供get_portfolio_selections使用）
+PORTFOLIO_DATA_DIR = Path(DEFAULT_CONFIG.get("data_dir", "~/Documents/TradingAgents/data")).expanduser()
+
 app = typer.Typer(
     name="TradingAgents",
     help="TradingAgents CLI: Multi-Agents LLM Financial Trading Framework",
     add_completion=True,  # Enable shell completion
+    invoke_without_command=True,  # Allow running without a command
 )
+
+
+@app.callback()
+def main_callback(ctx: typer.Context):
+    """
+    TradingAgents: Multi-Agents LLM Financial Trading Framework
+
+    直接运行进入交互式分析界面，或使用子命令管理Portfolio。
+    """
+    # If no command is given, run the interactive analysis
+    if ctx.invoked_subcommand is None:
+        run_analysis()
 
 
 # Create a deque to store recent messages with a maximum length
@@ -461,6 +477,83 @@ def update_display(layout, spinner_text=None):
     layout["footer"].update(Panel(stats_table, border_style="grey50", title="Statistics"))
 
 
+def get_portfolio_selections(create_question_box):
+    """Get user selections for portfolio mode analysis."""
+    from cli.portfolio import PortfolioManager
+
+    # Initialize portfolio manager
+    manager = PortfolioManager(PORTFOLIO_DATA_DIR)
+
+    # Step 1: Select Portfolio
+    console.print(
+        create_question_box(
+            "Step 1: 选择Portfolio", "选择要分析的自选股组合", ""
+        )
+    )
+    portfolio_name = select_portfolio(manager)
+    if portfolio_name is None:
+        console.print("[red]未选择Portfolio，退出...[/red]")
+        exit(1)
+
+    # Get stocks in the portfolio
+    tickers = manager.get_stocks(portfolio_name)
+    if not tickers:
+        console.print(f"[yellow]Portfolio '{portfolio_name}' 中没有股票[/yellow]")
+        exit(1)
+
+    console.print(f"[green]✅ 已选择: {portfolio_name} ({len(tickers)}只股票)[/green]")
+    console.print(f"[dim]股票列表: {', '.join(tickers)}[/dim]")
+
+    # Step 2: Analysis date
+    default_date = datetime.datetime.now().strftime("%Y-%m-%d")
+    console.print(
+        create_question_box(
+            "Step 2: 分析日期",
+            "输入分析日期 (YYYY-MM-DD)",
+            default_date,
+        )
+    )
+    analysis_date = get_analysis_date()
+
+    # Step 3: Parallel workers
+    console.print(
+        create_question_box(
+            "Step 3: 并行数量", "选择并行分析的股票数量", "3"
+        )
+    )
+    max_workers = select_parallel_workers()
+
+    # Step 4: LLM Provider
+    console.print(
+        create_question_box(
+            "Step 4: LLM Provider", "选择LLM服务商"
+        )
+    )
+    selected_llm_provider, backend_url = select_llm_provider()
+
+    # Step 5: LLM Model
+    console.print(
+        create_question_box(
+            "Step 5: 选择模型", "选择用于分析的LLM模型"
+        )
+    )
+    selected_model = select_thinking_agent(selected_llm_provider)
+
+    return {
+        "mode": "portfolio",
+        "portfolio_name": portfolio_name,
+        "tickers": tickers,
+        "analysis_date": analysis_date,
+        "max_workers": max_workers,
+        "llm_provider": selected_llm_provider.lower(),
+        "backend_url": backend_url,
+        "shallow_thinker": selected_model,
+        "deep_thinker": selected_model,
+        "analysts": [AnalystType.MARKET, AnalystType.SOCIAL, AnalystType.NEWS, AnalystType.FUNDAMENTALS],
+        "research_depth": 3,  # Default medium depth
+    }
+
+
 def get_user_selections():
     """Get all user selections before starting the analysis display."""
     # Display ASCII art welcome message
@@ -495,7 +588,19 @@ def get_user_selections():
             box_content += f"\n[dim]Default: {default}[/dim]"
         return Panel(box_content, border_style="blue", padding=(1, 2))
 
-    # Step 1: Market selection
+    # Step 0: Analysis Mode Selection
+    console.print(
+        create_question_box(
+            "Step 0: 分析模式", "选择单只股票分析或Portfolio批量分析", ""
+        )
+    )
+    analysis_mode = select_analysis_mode()
+
+    # If portfolio mode, use different flow
+    if analysis_mode == "portfolio":
+        return get_portfolio_selections(create_question_box)
+
+    # Step 1: Market selection (single stock mode)
     console.print(
         create_question_box(
             "Step 1: Select Market", "Choose the stock market to analyze", ""
@@ -562,6 +667,7 @@ def get_user_selections():
     selected_deep_thinker = selected_model
 
     return {
+        "mode": "single",
         "market": selected_market,
         "ticker": selected_ticker,
         "analysis_date": analysis_date,
@@ -824,6 +930,55 @@ def extract_content_string(content):
     else:
         return str(content)
 
+def run_portfolio_analysis(selections: dict, save_log: bool = False):
+    """Run portfolio analysis with TradingAgents.
+
+    Args:
+        selections: User selections dict with portfolio info
+        save_log: Save detailed JSON log to results folder
+    """
+    from cli.portfolio_analyzer import PortfolioAnalyzer
+
+    # Create config
+    config = DEFAULT_CONFIG.copy()
+    config["max_debate_rounds"] = selections["research_depth"]
+    config["max_risk_discuss_rounds"] = selections["research_depth"]
+    config["quick_think_llm"] = selections["shallow_thinker"]
+    config["deep_think_llm"] = selections["deep_thinker"]
+    config["backend_url"] = selections["backend_url"]
+    config["llm_provider"] = selections["llm_provider"].lower()
+
+    # Display summary
+    console.print("\n[bold cyan]═══════════════════════════════════════════════════════[/bold cyan]")
+    console.print(f"[bold]Portfolio批量分析[/bold]")
+    console.print(f"  Portfolio: [cyan]{selections['portfolio_name']}[/cyan]")
+    console.print(f"  股票数量: [green]{len(selections['tickers'])}[/green]")
+    console.print(f"  分析日期: {selections['analysis_date']}")
+    console.print(f"  并行数量: {selections['max_workers']}")
+    console.print(f"  LLM: {selections['llm_provider']} / {selections['deep_thinker']}")
+    console.print("[bold cyan]═══════════════════════════════════════════════════════[/bold cyan]\n")
+
+    # Create analyzer
+    analyzer = PortfolioAnalyzer(config, max_workers=selections["max_workers"])
+
+    # Run analysis
+    results = analyzer.analyze_portfolio(
+        portfolio_name=selections["portfolio_name"],
+        tickers=selections["tickers"],
+        analysis_date=selections["analysis_date"],
+        analysts=[analyst.value for analyst in selections["analysts"]]
+    )
+
+    # Display results
+    analyzer.display_results(results)
+
+    # Save summary report
+    results_dir = Path(config.get("results_dir", "./results"))
+    analyzer.save_summary_report(results, results_dir)
+
+    console.print("\n[bold green]✅ Portfolio分析完成！[/bold green]")
+
+
 def run_analysis(verbose: bool = False, save_log: bool = False):
     """Run stock analysis with TradingAgents.
 
@@ -834,6 +989,11 @@ def run_analysis(verbose: bool = False, save_log: bool = False):
     # First get all user selections
     selections = get_user_selections()
 
+    # Check if portfolio mode
+    if selections.get("mode") == "portfolio":
+        return run_portfolio_analysis(selections, save_log)
+
+    # Single stock mode continues below
     # Create config with selected research depth
     config = DEFAULT_CONFIG.copy()
     config["max_debate_rounds"] = selections["research_depth"]
@@ -1421,6 +1581,157 @@ def analyze(
 ):
     """Run stock analysis with TradingAgents multi-agent system."""
     run_analysis(verbose=verbose, save_log=save_log)
+
+
+# ============================================================
+# Portfolio 命令组
+# ============================================================
+
+from cli.portfolio import PortfolioManager
+from cli.portfolio_analyzer import PortfolioAnalyzer
+from cli.memory_tools import memory_app
+from cli.chat import chat_app
+
+portfolio_app = typer.Typer(
+    name="portfolio",
+    help="自选股Portfolio管理和批量分析",
+)
+app.add_typer(portfolio_app, name="portfolio")
+
+# Memory 管理命令组
+app.add_typer(memory_app, name="memory")
+
+# Chat 命令组
+app.add_typer(chat_app, name="chat")
+
+
+@portfolio_app.command("list")
+def portfolio_list():
+    """列出所有Portfolio"""
+    manager = PortfolioManager(PORTFOLIO_DATA_DIR)
+    manager.display_list()
+
+
+@portfolio_app.command("create")
+def portfolio_create(
+    name: str = typer.Argument(..., help="Portfolio名称"),
+    default: bool = typer.Option(False, "--default", "-d", help="设为默认Portfolio"),
+):
+    """创建新Portfolio"""
+    manager = PortfolioManager(PORTFOLIO_DATA_DIR)
+    manager.create(name, set_default=default)
+
+
+@portfolio_app.command("delete")
+def portfolio_delete(
+    name: str = typer.Argument(..., help="Portfolio名称"),
+):
+    """删除Portfolio"""
+    manager = PortfolioManager(PORTFOLIO_DATA_DIR)
+    manager.delete(name)
+
+
+@portfolio_app.command("rename")
+def portfolio_rename(
+    old_name: str = typer.Argument(..., help="原名称"),
+    new_name: str = typer.Argument(..., help="新名称"),
+):
+    """重命名Portfolio"""
+    manager = PortfolioManager(PORTFOLIO_DATA_DIR)
+    manager.rename(old_name, new_name)
+
+
+@portfolio_app.command("add")
+def portfolio_add(
+    name: str = typer.Argument(..., help="Portfolio名称"),
+    tickers: list[str] = typer.Argument(..., help="股票代码（可多个）"),
+):
+    """添加股票到Portfolio"""
+    manager = PortfolioManager(PORTFOLIO_DATA_DIR)
+    manager.add_stocks(name, tickers)
+
+
+@portfolio_app.command("remove")
+def portfolio_remove(
+    name: str = typer.Argument(..., help="Portfolio名称"),
+    tickers: list[str] = typer.Argument(..., help="股票代码（可多个）"),
+):
+    """从Portfolio移除股票"""
+    manager = PortfolioManager(PORTFOLIO_DATA_DIR)
+    manager.remove_stocks(name, tickers)
+
+
+@portfolio_app.command("show")
+def portfolio_show(
+    name: str = typer.Argument(..., help="Portfolio名称"),
+):
+    """显示Portfolio详情"""
+    manager = PortfolioManager(PORTFOLIO_DATA_DIR)
+    manager.display_portfolio(name)
+
+
+@portfolio_app.command("analyze")
+def portfolio_analyze(
+    name: str = typer.Argument(None, help="Portfolio名称（不指定则使用默认）"),
+    date: str = typer.Option(None, "--date", "-d", help="分析日期 (YYYY-MM-DD)"),
+    workers: int = typer.Option(3, "--workers", "-w", help="并行分析数量"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="详细输出"),
+):
+    """批量分析Portfolio中的所有股票"""
+    manager = PortfolioManager(PORTFOLIO_DATA_DIR)
+
+    # 确定要分析的portfolio
+    if name is None:
+        name = manager.get_default()
+        if name is None:
+            console.print("[red]未指定Portfolio且无默认Portfolio，请先创建[/red]")
+            raise typer.Exit(1)
+        console.print(f"[dim]使用默认Portfolio: {name}[/dim]")
+
+    # 获取股票列表
+    tickers = manager.get_stocks(name)
+    if tickers is None:
+        console.print(f"[red]Portfolio '{name}' 不存在[/red]")
+        raise typer.Exit(1)
+
+    if not tickers:
+        console.print(f"[yellow]Portfolio '{name}' 中没有股票[/yellow]")
+        raise typer.Exit(0)
+
+    # 确定分析日期
+    if date is None:
+        date = datetime.datetime.now().strftime("%Y-%m-%d")
+
+    # 获取用户配置（简化版，使用默认配置）
+    config = DEFAULT_CONFIG.copy()
+
+    # 交互式选择LLM（如果需要）
+    if verbose:
+        console.print("\n[bold]分析配置[/bold]")
+        console.print(f"  Portfolio: {name}")
+        console.print(f"  股票数量: {len(tickers)}")
+        console.print(f"  分析日期: {date}")
+        console.print(f"  并行度: {workers}")
+        console.print(f"  LLM: {config.get('deep_think_llm', 'default')}")
+
+    # 确认开始
+    console.print(f"\n即将分析 {len(tickers)} 只股票: {', '.join(tickers)}")
+
+    # 执行分析
+    analyzer = PortfolioAnalyzer(config, max_workers=workers)
+    results = analyzer.analyze_portfolio(
+        portfolio_name=name,
+        tickers=tickers,
+        analysis_date=date,
+        analysts=["market", "social", "news", "fundamentals"]
+    )
+
+    # 显示结果
+    analyzer.display_results(results)
+
+    # 保存汇总报告
+    results_dir = Path(config.get("results_dir", "./results"))
+    analyzer.save_summary_report(results, results_dir)
 
 
 if __name__ == "__main__":

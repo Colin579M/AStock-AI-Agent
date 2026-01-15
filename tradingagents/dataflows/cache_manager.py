@@ -116,8 +116,8 @@ class StockDataCache:
         for key, value in sorted(kwargs.items()):
             params_str += f"_{key}_{value}"
         
-        # Use MD5 to generate short unique identifier
-        cache_key = hashlib.md5(params_str.encode()).hexdigest()[:12]
+        # Use MD5 to generate unique identifier (16 chars to reduce collision risk)
+        cache_key = hashlib.md5(params_str.encode()).hexdigest()[:16]
         return f"{symbol}_{data_type}_{cache_key}"
     
     def _get_cache_path(self, data_type: str, cache_key: str, file_format: str = "json", symbol: str = None) -> Path:

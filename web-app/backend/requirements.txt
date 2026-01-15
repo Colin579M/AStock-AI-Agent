@@ -1,0 +1,25 @@
+# TradingAgents Web Backend Dependencies
+
+# Web Framework
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+
+# Authentication
+python-jose[cryptography]>=3.3.0
+passlib>=1.7.4
+PyJWT>=2.8.0
+
+# Request Validation
+pydantic>=2.5.0
+
+# CORS
+# (included in fastapi)
+
+# Async Support
+anyio>=4.0.0
+
+# Environment
+python-dotenv>=1.0.0
+
+# Note: TradingAgents dependencies (langchain, openai, etc.)
+# should be installed from the main project's requirements.txt

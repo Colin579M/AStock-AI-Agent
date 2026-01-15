@@ -4,9 +4,11 @@
 支持A股、港股实时数据和历史数据
 """
 
+import json
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 import warnings
 warnings.filterwarnings('ignore')
@@ -155,30 +157,27 @@ class TongDaXinDataProvider:
     def _get_stock_name(self, stock_code: str) -> str:
         """
         获取股票名称
-        优先级：缓存 -> MongoDB -> 常用股票映射 -> API获取（仅深圳市场） -> 默认格式
+        优先级：预加载缓存 -> MongoDB -> API获取（仅深圳市场） -> akshare -> 默认格式
         Args:
             stock_code: 股票代码
         Returns:
             str: 股票名称
         """
         global _stock_name_cache
-        
-        # 首先检查缓存
+
+        # 首次调用时预加载所有股票名称（从缓存文件或akshare）
+        _load_stock_names_cache()
+
+        # 检查缓存（包含预加载的所有股票）
         if stock_code in _stock_name_cache:
             return _stock_name_cache[stock_code]
         
-        # 优先从MongoDB获取
+        # 尝试从MongoDB获取（可能有缓存中没有的新股票）
         mongodb_name = _get_stock_name_from_mongodb(stock_code)
         if mongodb_name:
             _stock_name_cache[stock_code] = mongodb_name
             return mongodb_name
-        
-        # 检查常用股票映射表
-        if stock_code in _common_stock_names:
-            name = _common_stock_names[stock_code]
-            _stock_name_cache[stock_code] = name
-            return name
-        
+
         # 如果API不可用，直接返回默认格式
         if not self.connected:
             if not self.connect():
@@ -376,13 +375,19 @@ class TongDaXinDataProvider:
             indicators['MA10'] = df['Close'].rolling(10).mean().iloc[-1] if len(df) >= 10 else None
             indicators['MA20'] = df['Close'].rolling(20).mean().iloc[-1] if len(df) >= 20 else None
             
-            # RSI
+            # RSI（带除零保护）
             if len(df) >= 14:
                 delta = df['Close'].diff()
                 gain = (delta.where(delta > 0, 0)).rolling(14).mean()
                 loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-                rs = gain / loss
-                indicators['RSI'] = (100 - (100 / (1 + rs))).iloc[-1]
+                # 避免除零：当 loss 为 0 时，RSI = 100
+                last_gain = gain.iloc[-1]
+                last_loss = loss.iloc[-1]
+                if last_loss == 0 or pd.isna(last_loss):
+                    indicators['RSI'] = 100.0 if last_gain > 0 else 50.0
+                else:
+                    rs = last_gain / last_loss
+                    indicators['RSI'] = 100 - (100 / (1 + rs))
             
             # MACD
             if len(df) >= 26:
@@ -515,8 +520,74 @@ class TongDaXinDataProvider:
 # 全局实例和缓存
 _tdx_provider = None
 _stock_name_cache = {}  # 股票名称缓存，避免重复API调用
+_stock_names_loaded = False  # 标记是否已加载股票名称
 _mongodb_client = None
 _mongodb_db = None
+
+# 股票名称缓存文件路径
+_STOCK_NAMES_CACHE_FILE = Path(__file__).parent / "data_cache" / "stock_names.json"
+
+
+def _load_stock_names_cache():
+    """从缓存文件加载股票名称"""
+    global _stock_name_cache, _stock_names_loaded
+
+    if _stock_names_loaded:
+        return
+
+    # 首先加载硬编码的常用股票
+    _stock_name_cache.update(_common_stock_names)
+
+    # 尝试从缓存文件加载
+    if _STOCK_NAMES_CACHE_FILE.exists():
+        try:
+            with open(_STOCK_NAMES_CACHE_FILE, 'r', encoding='utf-8') as f:
+                cached_names = json.load(f)
+                _stock_name_cache.update(cached_names)
+                _stock_names_loaded = True
+                print(f"✅ 从缓存加载了 {len(cached_names)} 只股票名称")
+                return
+        except Exception as e:
+            print(f"⚠️ 读取股票名称缓存失败: {e}")
+
+    # 如果缓存不存在，从akshare获取并保存
+    _refresh_stock_names_cache()
+
+
+def _refresh_stock_names_cache():
+    """从akshare获取所有股票名称并保存到缓存"""
+    global _stock_name_cache, _stock_names_loaded
+
+    try:
+        import akshare as ak
+        print("📥 正在从 akshare 获取所有A股股票名称...")
+        df = ak.stock_info_a_code_name()
+
+        if df is not None and not df.empty:
+            # 构建股票代码->名称的映射
+            new_names = {}
+            for _, row in df.iterrows():
+                code = str(row['code']).zfill(6)
+                name = row['name'].strip()
+                new_names[code] = name
+
+            # 更新缓存
+            _stock_name_cache.update(new_names)
+            _stock_names_loaded = True
+
+            # 保存到文件
+            _STOCK_NAMES_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with open(_STOCK_NAMES_CACHE_FILE, 'w', encoding='utf-8') as f:
+                json.dump(new_names, f, ensure_ascii=False, indent=2)
+
+            print(f"✅ 已获取并缓存 {len(new_names)} 只股票名称")
+        else:
+            print("⚠️ akshare 返回空数据")
+            _stock_names_loaded = True  # 即使失败也标记为已加载，避免重复尝试
+
+    except Exception as e:
+        print(f"⚠️ 从 akshare 获取股票名称失败: {e}")
+        _stock_names_loaded = True  # 避免重复尝试
 
 def _get_mongodb_connection():
     """获取MongoDB连接"""
@@ -669,6 +740,50 @@ _common_stock_names = {
     '688169': '石头科技',
     '688012': '中微公司',
     '688036': '传音控股',
+
+    # 上海主板 - 银行类
+    '601818': '光大银行',
+    '601328': '交通银行',
+    '601229': '上海银行',
+    '601998': '中信银行',
+    '600015': '华夏银行',
+    '600926': '杭州银行',
+    '601169': '北京银行',
+    '601288': '农业银行',
+    '601939': '建设银行',
+    '601658': '邮储银行',
+
+    # 创业板 - 补充
+    '300373': '扬杰科技',
+    '300014': '亿纬锂能',
+    '300760': '迈瑞医疗',
+    '300033': '同花顺',
+    '300496': '中科创达',
+    '300782': '卓胜微',
+    '300759': '康龙化成',
+    '300408': '三环集团',
+    '300142': '沃森生物',
+    '300347': '泰格医药',
+    '300136': '信维通信',
+    '300433': '蓝思科技',
+    '300661': '圣邦股份',
+    '300394': '天孚通信',
+    '300308': '中际旭创',
+    '300832': '新产业',
+    '300724': '捷佳伟创',
+    '300223': '北京君正',
+
+    # 中小板 - 补充
+    '002230': '科大讯飞',
+    '002371': '北方华创',
+    '002049': '紫光国微',
+    '002241': '歌尔股份',
+    '002466': '天齐锂业',
+    '002460': '赣锋锂业',
+    '002129': '中环股份',
+    '002384': '东山精密',
+    '002271': '东方雨虹',
+    '002142': '宁波银行',
 }
 
 def get_tdx_provider() -> TongDaXinDataProvider:
@@ -779,7 +894,7 @@ def get_china_stock_data(stock_code: str, start_date: str, end_date: str) -> str
 - 数据条数: {len(df)}条
 - 期间最高: ¥{df['High'].max():.2f}
 - 期间最低: ¥{df['Low'].min():.2f}
-- 期间涨幅: {((df['Close'].iloc[-1] - df['Close'].iloc[0]) / df['Close'].iloc[0] * 100):.2f}%
+- 期间涨幅: {((df['Close'].iloc[-1] - df['Close'].iloc[0]) / df['Close'].iloc[0] * 100) if df['Close'].iloc[0] > 0 else 0:.2f}%
 
 ## 🔍 技术指标
 - MA5: ¥{indicators.get('MA5', 0):.2f}

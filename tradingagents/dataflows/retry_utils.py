@@ -204,20 +204,23 @@ def retry_with_backoff(
                         )
                         raise
 
-                    # 限流错误，延迟更长
+                    # 限流错误，使用更长的延迟倍数（单独计算，避免重复乘以 backoff_factor）
                     if error_category == ErrorCategory.RATE_LIMIT:
-                        delay = min(delay * backoff_factor * 2, max_delay)
+                        effective_delay = min(delay * 2, max_delay)
+                    else:
+                        effective_delay = delay
 
                     logger.warning(
                         f"{func.__name__} 第{attempt + 1}次失败，"
-                        f"{delay:.1f}秒后重试: {e}"
+                        f"{effective_delay:.1f}秒后重试: {e}"
                     )
 
                     # 执行重试回调
                     if on_retry:
                         on_retry(e, attempt + 1)
 
-                    time.sleep(delay)
+                    time.sleep(effective_delay)
+                    # 更新基础延迟（指数退避）
                     delay = min(delay * backoff_factor, max_delay)
 
             # 不应该到达这里

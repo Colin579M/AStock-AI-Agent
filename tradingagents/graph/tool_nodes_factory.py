@@ -76,8 +76,9 @@ def _create_social_tools(toolkit) -> ToolNode:
         toolkit.get_tushare_stock_basic,
         # 中国A股情绪工具 - Tushare Pro（高质量数据）
         toolkit.get_tushare_moneyflow,          # 资金流向（大/中/小单）
-        # 注：get_tushare_hk_hold 已移除（港交所2024年8月起仅提供季度数据）
-        toolkit.get_tushare_hsgt_top10,         # 沪深港通十大成交
+        # 北向资金工具 - AKShare（Tushare已停更）
+        toolkit.get_tushare_hsgt_top10,         # 北向资金十大持股
+        toolkit.get_tushare_hsgt_individual,    # 个股北向资金持股历史
         toolkit.get_tushare_margin,             # 融资融券
         toolkit.get_tushare_top10_holders,      # 前十大股东（含"香港中央结算"持股，可替代北向持股分析）
         toolkit.get_tushare_holder_number,      # 股东人数（筹码集中度）
@@ -187,7 +188,7 @@ def get_tool_node_summary() -> Dict[str, Dict[str, Any]]:
             "data_sources": ["通达信", "Tushare Pro", "Yahoo Finance"],
         },
         "social": {
-            "count": 14,  # 添加了block_trade, pledge_stat；移除了hk_hold
+            "count": 15,  # 添加了hsgt_individual（个股北向持股）
             "purpose": "资金面/情绪面分析",
             "data_sources": ["Tushare Pro", "AKShare", "Reddit"],
         },
