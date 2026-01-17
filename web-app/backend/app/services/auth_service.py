@@ -198,7 +198,8 @@ class AuthService:
         name: str,
         role: str = "user",
         expires_at: Optional[str] = None,
-        created_by: str = "system"
+        created_by: str = "system",
+        custom_code: Optional[str] = None
     ) -> Tuple[bool, str, str]:
         """
         创建新用户
@@ -209,6 +210,7 @@ class AuthService:
             role: 角色 (admin/user)
             expires_at: 过期时间 (ISO 格式)
             created_by: 创建者用户 ID
+            custom_code: 自定义访问码，为空则自动生成
 
         Returns:
             Tuple[bool, str, str]: (成功, 访问码/错误信息, 消息)
@@ -218,8 +220,8 @@ class AuthService:
             if user["user_id"] == user_id:
                 return (False, "", "用户 ID 已存在")
 
-        # 生成访问码
-        access_code = secrets.token_urlsafe(12)
+        # 使用自定义访问码或自动生成
+        access_code = custom_code.strip() if custom_code and custom_code.strip() else secrets.token_urlsafe(12)
         now = datetime.utcnow().isoformat() + "Z"
 
         new_user = {

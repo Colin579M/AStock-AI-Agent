@@ -285,10 +285,13 @@ async def get_intermediate_report(
     获取分析过程中的中间报告
 
     - 可在分析进行时获取已完成的分析师报告
-    - report_type: market_report, sentiment_report, news_report, fundamentals_report
+    - report_type: market_report, sentiment_report, news_report, fundamentals_report, research_report, risk_report
     """
     # 验证 report_type
-    valid_types = ["market_report", "sentiment_report", "news_report", "fundamentals_report"]
+    valid_types = [
+        "market_report", "sentiment_report", "news_report", "fundamentals_report",
+        "research_report", "risk_report"  # 研究结论、风控评估
+    ]
     if report_type not in valid_types:
         raise HTTPException(
             status_code=400,
@@ -313,7 +316,9 @@ async def get_intermediate_report(
         "market_report": "市场分析报告",
         "sentiment_report": "情绪分析报告",
         "news_report": "新闻分析报告",
-        "fundamentals_report": "基本面分析报告"
+        "fundamentals_report": "基本面分析报告",
+        "research_report": "研究结论报告",
+        "risk_report": "风控评估报告"
     }
 
     return {

@@ -34,7 +34,7 @@ class ChatOpenAIResponses(BaseChatModel):
     api_key: Optional[SecretStr] = Field(default=None, description="OpenAI API 密钥")
     base_url: Optional[str] = Field(default=None, description="自定义 API 地址")
     reasoning_effort: str = Field(default="medium", description="推理深度: none, low, medium, high, xhigh")
-    temperature: Optional[float] = Field(default=None, description="生成温度 (仅 reasoning=none 时有效)")
+    temperature: Optional[float] = Field(default=0.1, description="生成温度 (0.1 确保一致性，仅 reasoning=none 时有效)")
     max_tokens: int = Field(default=4000, description="最大生成token数")
     timeout: int = Field(default=120, description="API 调用超时时间（秒）")
 

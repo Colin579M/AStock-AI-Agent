@@ -213,6 +213,8 @@ class AnalysisService:
             data_logger = ToolDataLogger(tool_data_csv, ticker_for_path)
 
             config = DEFAULT_CONFIG.copy()
+            # Docker 环境下使用挂载的 named volume 路径
+            config["chroma_db_path"] = "/app/chroma_db"
 
             # 创建 Graph
             self._add_log(task_id, "初始化分析系统...")
@@ -358,6 +360,9 @@ class AnalysisService:
                         completed_reports.add("research_manager")
                         self._update_progress(task_id, "research_manager")
                         self._add_log(task_id, "✓ 研究主管完成")
+                        # 保存研究结论报告（供预览使用）
+                        research_content = self._format_research_report(debate)
+                        self._save_report_realtime(task_id, "research_report", research_content, "research_report.md")
                         self._set_current_step(task_id, "risky_manager", "激进风控")
                         self._add_log(task_id, "🛡️ 风控团队开始评估...")
 
@@ -383,6 +388,9 @@ class AnalysisService:
                         completed_reports.add("risk_manager")
                         self._update_progress(task_id, "risk_manager")
                         self._add_log(task_id, "✓ 风险主管完成")
+                        # 保存风控评估报告（供预览使用）
+                        risk_content = self._format_risk_report(risk)
+                        self._save_report_realtime(task_id, "risk_report", risk_content, "risk_report.md")
                         self._set_current_step(task_id, "consolidation", "综合报告")
                         self._add_log(task_id, "📝 正在生成综合报告...")
 
@@ -501,6 +509,53 @@ class AnalysisService:
         except Exception as e:
             logger.error(f"实时保存报告失败: {e}")
 
+    def _format_research_report(self, debate_state: dict) -> str:
+        """格式化研究结论报告"""
+        bull = debate_state.get('bull_history', '暂无')
+        bear = debate_state.get('bear_history', '暂无')
+        decision = debate_state.get('judge_decision', '暂无')
+
+        return f"""# 研究结论报告
+
+## 看涨观点
+
+{bull}
+
+## 看跌观点
+
+{bear}
+
+## 研究主管结论
+
+{decision}
+"""
+
+    def _format_risk_report(self, risk_state: dict) -> str:
+        """格式化风控评估报告"""
+        risky = risk_state.get('risky_history', '暂无')
+        safe = risk_state.get('safe_history', '暂无')
+        neutral = risk_state.get('neutral_history', '暂无')
+        decision = risk_state.get('judge_decision', '暂无')
+
+        return f"""# 风控评估报告
+
+## 激进风控意见
+
+{risky}
+
+## 保守风控意见
+
+{safe}
+
+## 中立风控意见
+
+{neutral}
+
+## 风控主管结论
+
+{decision}
+"""
+
     def _add_log(self, task_id: str, message: str):
         """添加日志（同时写入 message_tool.log）"""
         task = self._tasks.get(task_id)
@@ -591,9 +646,11 @@ class AnalysisService:
             # 保存完整状态（JSON 格式，方便后续分析）
             state_log = {
                 "ticker": task.ticker,
+                "ticker_name": task.ticker_name,
                 "date": task.date,
                 "signal": result.get("signal"),
                 "decision": result.get("decision"),
+                "user_id": task.user_id,
                 "created_at": task.created_at,
                 "completed_at": task.completed_at,
             }

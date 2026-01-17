@@ -1092,3 +1092,79 @@ class Toolkit:
         """
         from tradingagents.dataflows.tushare_utils import get_china_stock_institution
         return get_china_stock_institution(stock_code)
+
+    # ========================================================================
+    # 中国A股 Tushare Pro 扩展数据工具（2024-01 新增）
+    # ========================================================================
+
+    @staticmethod
+    @tool
+    def get_tushare_repurchase(
+        stock_code: Annotated[str, "股票代码，如 601899, 000001"],
+    ) -> str:
+        """
+        使用Tushare获取股票回购数据。
+        回购是管理层认为股价被低估的重要信号，对判断公司价值有重要参考。
+        包含回购计划、进度、金额、目的等信息。
+        Args:
+            stock_code (str): 股票代码，如 601899（紫金矿业）
+        Returns:
+            str: 格式化的股票回购分析报告
+        """
+        from tradingagents.dataflows.tushare_utils import get_repurchase
+        return get_repurchase(stock_code)
+
+    @staticmethod
+    @tool
+    def get_tushare_fund_shares(
+        stock_code: Annotated[str, "股票代码，如 601899, 000001"],
+    ) -> str:
+        """
+        使用Tushare获取基金持股数据。
+        包括公募基金、社保基金、QFII等机构持股情况，以及持仓变动。
+        用于分析机构投资者的持仓态度和变化趋势。
+        Args:
+            stock_code (str): 股票代码，如 601899（紫金矿业）
+        Returns:
+            str: 格式化的基金持股分析报告
+        """
+        from tradingagents.dataflows.tushare_utils import get_fund_shares
+        return get_fund_shares(stock_code)
+
+    @staticmethod
+    @tool
+    def get_tushare_adj_factor(
+        stock_code: Annotated[str, "股票代码，如 601899, 000001"],
+        start_date: Annotated[str, "开始日期 YYYYMMDD，可选"] = None,
+        end_date: Annotated[str, "结束日期 YYYYMMDD，可选"] = None,
+    ) -> str:
+        """
+        使用Tushare获取复权因子数据。
+        复权因子用于计算除权除息后的真实价格涨跌幅，识别分红、配股、送股事件。
+        对于长期趋势分析和回测非常重要。
+        Args:
+            stock_code (str): 股票代码，如 601899（紫金矿业）
+            start_date (str): 开始日期，格式 YYYYMMDD
+            end_date (str): 结束日期，格式 YYYYMMDD
+        Returns:
+            str: 格式化的复权因子分析报告
+        """
+        from tradingagents.dataflows.tushare_utils import get_adj_factor
+        return get_adj_factor(stock_code, start_date, end_date)
+
+    @staticmethod
+    @tool
+    def get_tushare_concept(
+        stock_code: Annotated[str, "股票代码，如 601899, 000001"],
+    ) -> str:
+        """
+        使用Tushare获取股票所属概念板块。
+        了解股票所属的热点概念，判断板块联动效应和炒作机会。
+        对于分析行业/板块动态和资金流向非常有用。
+        Args:
+            stock_code (str): 股票代码，如 601899（紫金矿业）
+        Returns:
+            str: 格式化的概念板块分析报告
+        """
+        from tradingagents.dataflows.tushare_utils import get_concept
+        return get_concept(stock_code)

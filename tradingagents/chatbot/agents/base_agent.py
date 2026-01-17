@@ -8,8 +8,9 @@ from abc import ABC, abstractmethod
 from typing import Optional, List, Callable
 from datetime import datetime
 
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
 from langgraph.prebuilt import create_react_agent
+from langgraph.errors import GraphRecursionError
 
 from ..tools.registry import load_all_tools, load_quick_tools, load_analysis_tools
 from ..config import get_chatbot_config
@@ -102,6 +103,39 @@ class BaseAgent(ABC):
         """获取错误提示（子类可覆盖）"""
         return "抱歉，无法处理请求。"
 
+    def _fallback_llm_response(self, query: str, collected_data: str = "") -> str:
+        """
+        当 Agent 超限时，直接用 LLM 回答
+
+        Args:
+            query: 原始用户查询
+            collected_data: 已收集的工具数据（可选）
+
+        Returns:
+            str: LLM 直接回答
+        """
+        from datetime import datetime
+
+        if collected_data:
+            prompt = f"""你是A股投资助手。用户问题：{query}
+
+已获取的数据：
+{collected_data}
+
+请基于以上数据和你的知识回答用户问题。今天是 {datetime.now().strftime("%Y-%m-%d")}。用中文回答。"""
+        else:
+            prompt = f"""你是A股投资助手。用户问题：{query}
+
+请基于你的知识回答用户问题。如果涉及具体股票，请说明你的分析依据。
+今天是 {datetime.now().strftime("%Y-%m-%d")}。用中文回答。"""
+
+        try:
+            response = self.llm.invoke([HumanMessage(content=prompt)])
+            return response.content if hasattr(response, 'content') else str(response)
+        except Exception as e:
+            logger.error(f"Fallback LLM 调用失败: {e}")
+            return self.error_message
+
     def _create_agent(self):
         """创建 ReAct Agent"""
         system_prompt = self._get_system_prompt().format(
@@ -145,6 +179,11 @@ class BaseAgent(ABC):
 
             return self.error_message
 
+        except GraphRecursionError:
+            # Agent 超过迭代限制，直接用 LLM 回答
+            logger.warning(f"Agent 超过迭代限制，使用 LLM 直接回答: {query[:50]}...")
+            return self._fallback_llm_response(query)
+
         except Exception as e:
             logger.error(f"{self.__class__.__name__} 执行失败: {e}")
             return f"处理失败: {str(e)}"
@@ -166,15 +205,16 @@ class BaseAgent(ABC):
         Returns:
             str: 查询结果
         """
+        messages = []
+        if history:
+            messages.extend(history)
+        messages.append(HumanMessage(content=query))
+
+        final_response = None
+        seen_tools = set()
+        collected_tool_data = []  # 收集工具返回的数据
+
         try:
-            messages = []
-            if history:
-                messages.extend(history)
-            messages.append(HumanMessage(content=query))
-
-            final_response = None
-            seen_tools = set()
-
             for chunk in self.agent.stream(
                 {"messages": messages},
                 {"recursion_limit": self.recursion_limit}
@@ -195,10 +235,15 @@ class BaseAgent(ABC):
                                 if emit:
                                     emit("tool", f"获取{display_name}...")
 
-                    # 检测工具返回
+                    # 检测工具返回，收集数据
                     if isinstance(msg, ToolMessage):
                         if emit:
                             emit("tool", "✓ 数据已获取")
+                        # 收集工具数据（截断过长的内容）
+                        content = msg.content if hasattr(msg, 'content') else str(msg)
+                        if len(content) > 500:
+                            content = content[:500] + "..."
+                        collected_tool_data.append(content)
 
                     # 检测最终回答
                     if isinstance(msg, AIMessage) and msg.content and not getattr(msg, "tool_calls", None):
@@ -219,6 +264,14 @@ class BaseAgent(ABC):
                         break
 
             return final_response or self.error_message
+
+        except GraphRecursionError:
+            # Agent 超过迭代限制，使用已收集的数据直接让 LLM 回答
+            logger.warning(f"Agent 超过迭代限制，使用 LLM 直接回答: {query[:50]}...")
+            if emit:
+                emit("thinking", "数据收集完成，正在生成回答...")
+            collected_data = "\n".join(collected_tool_data) if collected_tool_data else ""
+            return self._fallback_llm_response(query, collected_data)
 
         except Exception as e:
             logger.error(f"{self.__class__.__name__} 执行失败: {e}")

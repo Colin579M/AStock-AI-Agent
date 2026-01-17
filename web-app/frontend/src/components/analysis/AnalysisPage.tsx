@@ -56,6 +56,8 @@ const ANALYST_REPORT_MAP: Record<string, string> = {
   'social_analyst': 'sentiment_report',
   'news_analyst': 'news_report',
   'fundamentals_analyst': 'fundamentals_report',
+  'research_manager': 'research_report',   // 研究结论
+  'risk_manager': 'risk_report',           // 风控评估
 };
 
 export const AnalysisPage: React.FC = () => {

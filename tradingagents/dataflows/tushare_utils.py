@@ -2040,3 +2040,313 @@ def get_all_stocks_daily(trade_date: str = None) -> pd.DataFrame:
                 logger.warning("[tushare] 使用过期缓存数据")
                 return _market_data_cache.copy()
             return pd.DataFrame()
+
+
+# ============================================================
+# 新增数据接口（2024-01 扩展）
+# ============================================================
+
+def get_repurchase(stock_code: str) -> str:
+    """
+    获取股票回购数据
+
+    回购是管理层认为股价被低估时的重要信号，对投资决策有重要参考价值。
+
+    Args:
+        stock_code: 股票代码
+
+    Returns:
+        回购数据的格式化字符串
+    """
+    try:
+        pro = get_pro_api()
+        ts_code = convert_stock_code(stock_code)
+
+        # 获取回购数据
+        df = pro.repurchase(ts_code=ts_code)
+
+        if df is None or df.empty:
+            return f"未找到股票 {stock_code} 的回购数据（可能暂无回购计划）"
+
+        result = []
+        result.append("# 股权回购分析\n")
+        result.append(f"## {stock_code} 回购记录\n")
+
+        # 按公告日期排序，最新的在前
+        df = df.sort_values('ann_date', ascending=False)
+
+        for _, row in df.head(5).iterrows():  # 最近5条
+            result.append(f"### 公告日期: {row.get('ann_date', 'N/A')}")
+            result.append(f"- **回购进度**: {row.get('proc', 'N/A')}")
+
+            # 回购金额
+            exp_amount = row.get('exp_amount', 0)
+            if pd.notna(exp_amount) and exp_amount > 0:
+                result.append(f"- **计划回购金额**: {exp_amount/10000:.2f}亿元")
+
+            amount = row.get('amount', 0)
+            if pd.notna(amount) and amount > 0:
+                result.append(f"- **已回购金额**: {amount/10000:.2f}亿元")
+
+            # 回购股数
+            vol = row.get('vol', 0)
+            if pd.notna(vol) and vol > 0:
+                result.append(f"- **已回购股数**: {vol/10000:.2f}万股")
+
+            # 回购价格
+            high_limit = row.get('high_limit', 0)
+            if pd.notna(high_limit) and high_limit > 0:
+                result.append(f"- **回购价格上限**: {high_limit:.2f}元")
+
+            # 回购目的
+            purpose = row.get('purpose', '')
+            if purpose:
+                result.append(f"- **回购目的**: {purpose}")
+
+            result.append("")
+
+        # 投资提示
+        result.append("## 投资提示")
+        result.append("- 回购通常表明管理层认为股价被低估")
+        result.append("- 注意回购进度和完成率")
+        result.append("- 关注回购目的（注销/股权激励/员工持股）")
+
+        return "\n".join(result)
+
+    except Exception as e:
+        return f"获取回购数据失败: {str(e)}"
+
+
+def get_fund_shares(stock_code: str, period: str = None) -> str:
+    """
+    获取基金持股数据
+
+    查询公募基金持有某只股票的情况（季度数据）。
+
+    Args:
+        stock_code: 股票代码（如 600036.SH 或 600036）
+        period: 报告期，如 "20240930"，默认获取最新一期
+
+    Returns:
+        基金持股数据的格式化字符串
+    """
+    try:
+        pro = get_pro_api()
+
+        # fund_portfolio 接口使用 symbol 参数（带后缀的完整代码如 600036.SH）
+        ts_code = convert_stock_code(stock_code)
+        symbol = ts_code  # 使用完整代码
+
+        # 如果没有指定期，尝试获取最近可用的季度数据
+        # 基金持仓数据一般滞后1-2个季度发布
+        if not period:
+            # 尝试几个最近的季度末，直到找到有数据的
+            now = datetime.now()
+            quarters_to_try = []
+            for i in range(6):  # 尝试最近6个季度
+                # 计算往前推i个季度的季末日期
+                month = now.month - (now.month - 1) % 3  # 当前季度首月
+                quarter_date = datetime(now.year, month, 1) - timedelta(days=1 + 90*i)
+                # 找到该季度的末日
+                qe_month = ((quarter_date.month - 1) // 3 + 1) * 3
+                qe_day = 31 if qe_month == 12 else (30 if qe_month in [6, 9] else 31)
+                if qe_month == 3:
+                    qe_day = 31
+                qe = datetime(quarter_date.year, qe_month, qe_day)
+                quarters_to_try.append(qe.strftime('%Y%m%d'))
+
+            # 使用最近一个可能有数据的季度（通常是2-3个季度前）
+            period = quarters_to_try[2] if len(quarters_to_try) > 2 else quarters_to_try[0]
+
+        # 获取基金持股数据
+        df = pro.fund_portfolio(symbol=symbol, period=period)
+
+        if df is None or df.empty:
+            return f"未找到股票 {stock_code} 在 {period} 期的基金持股数据"
+
+        result = []
+        result.append("# 基金持股分析\n")
+
+        # 获取报告期
+        report_period = df['end_date'].iloc[0] if 'end_date' in df.columns else period
+        result.append(f"## 截至 {report_period} 基金持股情况\n")
+
+        # 按持股数量排序
+        if 'amount' in df.columns:
+            df = df.sort_values('amount', ascending=False)
+
+        result.append("| 基金代码 | 持股数量(万股) | 市值占比(%) | 流通股占比(%) |")
+        result.append("|---------|--------------|------------|--------------|")
+
+        for _, row in df.head(15).iterrows():
+            fund_code = row.get('ts_code', 'N/A')
+
+            amount = row.get('amount', 0)
+            amount_str = f"{amount/10000:.2f}" if pd.notna(amount) else 'N/A'
+
+            mkv_ratio = row.get('stk_mkv_ratio', 0)
+            mkv_str = f"{mkv_ratio:.2f}" if pd.notna(mkv_ratio) else 'N/A'
+
+            float_ratio = row.get('stk_float_ratio', 0)
+            float_str = f"{float_ratio:.2f}" if pd.notna(float_ratio) else 'N/A'
+
+            result.append(f"| {fund_code} | {amount_str} | {mkv_str} | {float_str} |")
+
+        result.append("")
+
+        # 汇总统计
+        total_funds = len(df)
+        total_amount = df['amount'].sum() if 'amount' in df.columns else 0
+        avg_float_ratio = df['stk_float_ratio'].mean() if 'stk_float_ratio' in df.columns else 0
+
+        result.append(f"**持股基金数量**: {total_funds} 只")
+        result.append(f"**基金合计持股**: {total_amount/10000:.2f} 万股")
+        result.append(f"**平均流通股占比**: {avg_float_ratio:.4f}%")
+
+        result.append("\n## 投资提示")
+        if total_funds > 100:
+            result.append("- 基金扎堆持有，机构关注度高")
+        elif total_funds > 50:
+            result.append("- 基金持股较多，机构认可度较好")
+        else:
+            result.append("- 基金持股数量一般，机构关注度中等")
+
+        return "\n".join(result)
+
+    except Exception as e:
+        return f"获取基金持股数据失败: {str(e)}"
+
+
+def get_adj_factor(stock_code: str, start_date: str = None, end_date: str = None) -> str:
+    """
+    获取复权因子数据
+
+    复权因子用于计算除权除息后的真实价格涨跌幅。
+
+    Args:
+        stock_code: 股票代码
+        start_date: 开始日期 YYYYMMDD
+        end_date: 结束日期 YYYYMMDD
+
+    Returns:
+        复权因子数据的格式化字符串
+    """
+    try:
+        pro = get_pro_api()
+        ts_code = convert_stock_code(stock_code)
+
+        # 默认获取最近一年数据
+        if not end_date:
+            end_date = datetime.now().strftime('%Y%m%d')
+        if not start_date:
+            start_date = (datetime.now() - timedelta(days=365)).strftime('%Y%m%d')
+
+        # 获取复权因子
+        df = pro.adj_factor(ts_code=ts_code, start_date=start_date, end_date=end_date)
+
+        if df is None or df.empty:
+            return f"未找到股票 {stock_code} 的复权因子数据"
+
+        result = []
+        result.append("# 复权因子分析\n")
+        result.append(f"## {stock_code} 复权因子 ({start_date} ~ {end_date})\n")
+
+        # 按日期排序
+        df = df.sort_values('trade_date', ascending=False)
+
+        # 获取最新和最早的复权因子
+        latest = df.iloc[0]
+        earliest = df.iloc[-1]
+
+        latest_adj = latest['adj_factor']
+        earliest_adj = earliest['adj_factor']
+
+        result.append(f"**最新复权因子**: {latest_adj:.4f} ({latest['trade_date']})")
+        result.append(f"**期初复权因子**: {earliest_adj:.4f} ({earliest['trade_date']})")
+
+        # 计算期间复权调整幅度
+        if earliest_adj > 0:
+            adj_change = (latest_adj / earliest_adj - 1) * 100
+            result.append(f"**期间复权调整**: {adj_change:+.2f}%")
+        result.append("")
+
+        # 检测除权除息事件（复权因子突变）
+        df['adj_change'] = df['adj_factor'].diff(-1)  # 与前一天比较
+        events = df[df['adj_change'].abs() > 0.001]  # 变动超过0.1%
+
+        if not events.empty:
+            result.append("## 除权除息事件\n")
+            result.append("| 日期 | 复权因子 | 变动幅度 |")
+            result.append("|------|---------|---------|")
+
+            for _, row in events.head(10).iterrows():
+                change_pct = (row['adj_change'] / row['adj_factor']) * 100 if row['adj_factor'] > 0 else 0
+                result.append(f"| {row['trade_date']} | {row['adj_factor']:.4f} | {change_pct:+.2f}% |")
+
+        result.append("")
+        result.append("## 使用说明")
+        result.append("- 前复权价格 = 原始价格 × 复权因子 / 最新复权因子")
+        result.append("- 复权因子变动表示有分红、配股、送股等事件")
+
+        return "\n".join(result)
+
+    except Exception as e:
+        return f"获取复权因子失败: {str(e)}"
+
+
+def get_concept(stock_code: str) -> str:
+    """
+    获取股票所属概念板块
+
+    了解股票所属的热点概念，判断板块联动效应。
+
+    Args:
+        stock_code: 股票代码
+
+    Returns:
+        概念板块数据的格式化字符串
+    """
+    try:
+        pro = get_pro_api()
+        ts_code = convert_stock_code(stock_code)
+
+        # 获取概念板块成分
+        df = pro.concept_detail(ts_code=ts_code)
+
+        if df is None or df.empty:
+            return f"未找到股票 {stock_code} 的概念板块数据"
+
+        result = []
+        result.append("# 概念板块分析\n")
+        result.append(f"## {stock_code} 所属概念板块\n")
+
+        result.append("| 概念名称 | 概念代码 | 板块说明 |")
+        result.append("|---------|---------|---------|")
+
+        for _, row in df.iterrows():
+            concept_name = row.get('concept_name', 'N/A')
+            concept_code = row.get('id', row.get('concept_code', 'N/A'))
+
+            # 尝试获取概念说明
+            desc = row.get('concept_desc', '')
+            if not desc and 'in_date' in row:
+                desc = f"纳入日期: {row['in_date']}"
+            if len(desc) > 30:
+                desc = desc[:30] + '...'
+
+            result.append(f"| {concept_name} | {concept_code} | {desc} |")
+
+        result.append("")
+        result.append(f"**所属概念数量**: {len(df)} 个")
+        result.append("")
+
+        # 投资提示
+        result.append("## 投资提示")
+        result.append("- 关注热点概念板块的轮动机会")
+        result.append("- 同一概念板块内的股票可能存在联动效应")
+        result.append("- 概念炒作需注意风险，关注基本面支撑")
+
+        return "\n".join(result)
+
+    except Exception as e:
+        return f"获取概念板块失败: {str(e)}"

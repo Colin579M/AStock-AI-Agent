@@ -85,6 +85,18 @@ async def health_check():
     return {"status": "healthy"}
 
 
+@app.get("/api/changelog")
+async def get_changelog():
+    """获取更新日志（公开接口，无需认证）"""
+    import json
+    # changelog.json 放在 app/ 目录下，确保被 Docker 复制
+    changelog_file = Path(__file__).parent / "changelog.json"
+    if changelog_file.exists():
+        with open(changelog_file, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {"updates": []}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

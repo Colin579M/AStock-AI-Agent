@@ -23,6 +23,8 @@ def create_market_analyst(llm, toolkit):
                 toolkit.get_tushare_index_daily,   # 板块指数日线（用于相对强弱分析）
                 toolkit.get_tushare_fut_daily,     # 期货日线（铜/金价格联动）
                 toolkit.get_tushare_share_float,   # 解禁日历（催化剂时点）
+                # === Phase 2.3 新增工具：复权因子 ===
+                toolkit.get_tushare_adj_factor,    # 复权因子（除权除息分析）
             ]
         elif toolkit.config["online_tools"]:
             # 美股/其他市场使用Yahoo Finance在线工具
@@ -55,6 +57,7 @@ def create_market_analyst(llm, toolkit):
    - 黄金相关股票用 AU.SHF（沪金）
    - 铝相关股票用 AL.SHF（沪铝）
 7. **新增** 调用 get_tushare_share_float 获取解禁日历，评估潜在供给压力
+8. **新增** 调用 get_tushare_adj_factor 获取复权因子，分析除权除息影响
 
 【股票代码格式】
 - 通达信工具：直接使用6位代码（如 601899）
@@ -104,6 +107,14 @@ def create_market_analyst(llm, toolkit):
    - 基于换手率评估大单进出的滑点成本
    - 万亿市值股流动性通常充足
 
+6. **除权除息分析**（使用 get_tushare_adj_factor）:
+   - 查询近期复权因子变化，识别除权除息日
+   - 判断价格缺口是技术性除权还是真实下跌
+   - 高分红股票：关注除息后的填权/贴权走势
+   - 送转股：注意股本扩大后对EPS的稀释效应
+   - 引用数据示例："X月Y日除权除息，复权因子从1.0变为Z，已/未完成填权"
+   - **交易提示**：除权后支撑/阻力位需按复权因子重新计算
+
 中国A股市场特色考虑：
 - 涨跌停板限制（主板10%，创业板/科创板20%）
 - T+1交易制度
@@ -118,6 +129,7 @@ def create_market_analyst(llm, toolkit):
 3. 板块相对强弱数据（如有板块指数数据）
 4. 商品期货联动分析（如为周期股）
 5. 关键催化剂时点（如有解禁数据）
+6. 除权除息分析（如近期有分红/送转）
 
 报告末尾附上Markdown表格总结关键发现，包含：
 | 指标 | 数值 | 判断 |
@@ -129,6 +141,7 @@ def create_market_analyst(llm, toolkit):
 | RSI | X | 超买/超卖/中性 |
 | 板块相对强弱 | +X%/-X% | 强势/弱势 |
 | 估值分位 | X% | 高估/合理/低估 |
+| 除权除息 | 近期有/无 | 已填权/贴权/不适用 |
 
 【数据缺失处理】
 如果某些数据无法获取，请按以下方式处理：

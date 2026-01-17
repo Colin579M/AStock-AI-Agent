@@ -54,6 +54,7 @@ class CreateUserRequest(BaseModel):
     name: str
     role: Literal["user", "admin"] = "user"
     expires_at: Optional[str] = None
+    access_code: Optional[str] = None  # 自定义访问码，留空则自动生成
 
 
 class CreateUserResponse(BaseModel):
@@ -107,10 +108,14 @@ class ApiStatsResponse(BaseModel):
 class ReportInfo(BaseModel):
     """报告信息"""
     ticker: str
+    ticker_name: str = ""
     date: str
     report_count: int
     summary: str
     path: str
+    user_id: str = ""
+    created_at: str = ""
+    completed_at: str = ""
 
 
 class ConversationInfo(BaseModel):
@@ -155,7 +160,8 @@ async def create_user(
         name=request.name,
         role=request.role,
         expires_at=request.expires_at,
-        created_by=admin["user_id"]
+        created_by=admin["user_id"],
+        custom_code=request.access_code  # 传递自定义访问码
     )
 
     if success:

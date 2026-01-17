@@ -69,6 +69,16 @@ class AdminService:
         # 启动时间
         self._start_time = datetime.now()
 
+        # CPU 监控缓存（避免短间隔采样不准确）
+        self._cpu_percent_cache = 0.0
+        self._cpu_last_update = datetime.now()
+        self._process = psutil.Process()
+        # 初始化 CPU 采样（首次调用返回0，需要预热）
+        try:
+            self._process.cpu_percent()
+        except Exception:
+            pass
+
     def _init_logs_file(self):
         """初始化日志文件"""
         if not self.logs_file.exists():
@@ -96,13 +106,24 @@ class AdminService:
             chat_service: 聊天服务实例（可选）
         """
         # 内存使用
-        process = psutil.Process()
-        memory_info = process.memory_info()
+        memory_info = self._process.memory_info()
         memory_mb = memory_info.rss / 1024 / 1024
-        memory_percent = process.memory_percent()
+        memory_percent = self._process.memory_percent()
 
-        # CPU 使用（系统整体）
-        cpu_percent = psutil.cpu_percent(interval=0.1)
+        # CPU 使用（进程级别，更新缓存以获得准确值）
+        # psutil 的 cpu_percent() 需要两次调用之间的时间差来计算
+        # 这里直接获取进程 CPU（非阻塞），依赖上次调用的时间差
+        try:
+            cpu_percent = self._process.cpu_percent()
+            # 如果值为0且距离上次更新不到1秒，使用缓存值
+            now = datetime.now()
+            if cpu_percent > 0:
+                self._cpu_percent_cache = cpu_percent
+                self._cpu_last_update = now
+            elif (now - self._cpu_last_update).total_seconds() < 5:
+                cpu_percent = self._cpu_percent_cache
+        except Exception:
+            cpu_percent = self._cpu_percent_cache
 
         # 活跃任务数
         active_tasks = 0
@@ -228,12 +249,33 @@ class AdminService:
                         except Exception:
                             pass
 
+                    # 读取分析摘要（包含用户和时间信息）
+                    ticker_name = ""
+                    user_id = ""
+                    created_at = ""
+                    completed_at = ""
+                    summary_file = date_dir / "analysis_summary.json"
+                    if summary_file.exists():
+                        try:
+                            with open(summary_file, 'r', encoding='utf-8') as f:
+                                summary_data = json.load(f)
+                                ticker_name = summary_data.get("ticker_name", "")
+                                user_id = summary_data.get("user_id", "")
+                                created_at = summary_data.get("created_at", "")
+                                completed_at = summary_data.get("completed_at", "")
+                        except Exception:
+                            pass
+
                     reports.append({
                         "ticker": ticker,
+                        "ticker_name": ticker_name,
                         "date": date,
                         "report_count": len(report_files),
                         "summary": summary,
-                        "path": str(date_dir)
+                        "path": str(date_dir),
+                        "user_id": user_id,
+                        "created_at": created_at,
+                        "completed_at": completed_at
                     })
 
         # 按日期降序排序

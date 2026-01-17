@@ -4,8 +4,8 @@
       "version": "v0.1.6",
       "date": "2026-01-18",
       "type": "improve",
-      "title": "报告输出全中文化",
-      "description": "优化执行摘要中目标价推导部分，将英文JSON字段名改为中文表述，提升阅读体验"
+      "title": "报告中文化与多项优化",
+      "description": "报告输出全中文化、新增Tushare数据工具、优化分析师提示词、增强Chatbot功能、前端UI优化、部署脚本增强"
     },
     {
       "version": "v0.1.5",
