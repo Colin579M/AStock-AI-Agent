@@ -1,0 +1,362 @@
+/* ========================================
+   全局样式 - 移动端优先
+   美化版本 v2.0 - 增强人机交互
+   ======================================== */
+
+/* CSS 变量 - 设计系统 */
+:root {
+  /* 主色调 */
+  --primary-dark: #1a1a2e;
+  --primary-dark-light: #16213e;
+  --primary-blue: #4a90d9;
+  --primary-blue-hover: #357abd;
+  --primary-blue-glow: rgba(74, 144, 217, 0.4);
+
+  /* 背景色 */
+  --bg-light: #f5f7fa;
+  --bg-card: #ffffff;
+  --bg-glass: rgba(255, 255, 255, 0.85);
+
+  /* 状态色 - 买入/卖出/持有 */
+  --success: #22c55e;
+  --success-light: #dcfce7;
+  --success-bg: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
+  --error: #ef4444;
+  --error-light: #fee2e2;
+  --error-bg: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+  --warning: #f59e0b;
+  --warning-light: #fef3c7;
+  --warning-bg: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+
+  /* 团队识别色 */
+  --team-analyst: #6366f1;
+  --team-researcher: #8b5cf6;
+  --team-trader: #0ea5e9;
+  --team-risk: #f97316;
+
+  /* 文字色 */
+  --text-primary: #1a1a2e;
+  --text-secondary: #666666;
+  --text-muted: #999999;
+
+  /* 圆角 */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+
+  /* 阴影 */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.12);
+  --shadow-glow: 0 4px 20px var(--primary-blue-glow);
+
+  /* 过渡 */
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.25s ease;
+  --transition-smooth: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* 字体 */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'SF Mono', 'Fira Code', 'Monaco', 'Consolas', 'Liberation Mono', monospace;
+
+  /* ==================== PC响应式系统 ==================== */
+
+  /* 响应式容器宽度 - 使用clamp()实现流式布局 */
+  --container-sm: clamp(320px, 90vw, 480px);
+  --container-md: clamp(400px, 85vw, 640px);
+  --container-lg: clamp(600px, 80vw, 960px);
+  --container-xl: clamp(800px, 75vw, 1200px);
+  --container-2xl: clamp(1000px, 70vw, 1600px);
+  --container-fluid: min(95vw, 100% - 2rem);
+
+  /* 页面边距 - 响应式 */
+  --spacing-page-x: clamp(16px, 4vw, 48px);
+  --spacing-page-y: clamp(16px, 3vw, 32px);
+
+  /* 侧边栏宽度 */
+  --sidebar-width: clamp(200px, 15vw, 280px);
+  --sidebar-collapsed: 60px;
+
+  /* 网格间距 */
+  --grid-gap: clamp(12px, 2vw, 24px);
+
+  /* 卡片最小宽度 */
+  --card-min-width: clamp(280px, 30vw, 400px);
+
+  /* 内容区最大宽度 - 无限制版本 */
+  --content-max-sm: clamp(500px, 65vw, 900px);
+  --content-max-md: clamp(600px, 70vw, 1000px);
+  --content-max-lg: clamp(800px, 80vw, 1400px);
+  --content-max-xl: clamp(1000px, 85vw, 1600px);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* 选择文本颜色 */
+::selection {
+  background: var(--primary-blue);
+  color: white;
+}
+
+:root {
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  min-height: 100vh;
+  background-color: var(--bg-light);
+  color: var(--text-primary);
+  overflow-x: hidden;
+}
+
+#root {
+  width: 100%;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* 链接样式 */
+a {
+  color: var(--primary-blue);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+a:hover {
+  color: var(--primary-blue-hover);
+  text-decoration: underline;
+}
+
+/* 按钮基础样式 */
+button {
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--transition-smooth);
+}
+
+button:focus {
+  outline: none;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--primary-blue);
+  outline-offset: 2px;
+}
+
+/* 按钮点击涟漪效果基础 */
+button {
+  position: relative;
+  overflow: hidden;
+}
+
+button::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  transition: width 0.4s ease, height 0.4s ease;
+}
+
+button:active::after {
+  width: 200px;
+  height: 200px;
+}
+
+/* 输入框样式 */
+input, textarea {
+  font-family: inherit;
+  font-size: 16px;
+  transition: all var(--transition-fast);
+}
+
+input:focus, textarea:focus {
+  outline: none;
+}
+
+/* 美化滚动条 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #d1d5db 0%, #9ca3af 100%);
+  border-radius: 3px;
+  transition: background var(--transition-fast);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #9ca3af 0%, #6b7280 100%);
+}
+
+/* 暗色滚动条（用于深色背景） */
+.dark-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.dark-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* 通用动画 */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+/* 工具类 */
+.animate-fadeIn {
+  animation: fadeIn 0.3s ease forwards;
+}
+
+.animate-fadeInUp {
+  animation: fadeInUp 0.4s ease forwards;
+}
+
+.glass-effect {
+  background: var(--bg-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* ==================== PC大屏响应式断点覆盖 ==================== */
+
+/* 中等桌面 - 1024px+ */
+@media (min-width: 1024px) {
+  :root {
+    --spacing-page-x: clamp(24px, 5vw, 64px);
+    --sidebar-width: clamp(220px, 16vw, 300px);
+    --grid-gap: clamp(14px, 2vw, 28px);
+  }
+}
+
+/* 大桌面 - 1280px+ */
+@media (min-width: 1280px) {
+  :root {
+    --spacing-page-x: clamp(32px, 6vw, 80px);
+    --grid-gap: clamp(16px, 2.5vw, 32px);
+    --card-min-width: clamp(300px, 28vw, 420px);
+  }
+}
+
+/* 全高清 - 1920px+ */
+@media (min-width: 1920px) {
+  :root {
+    --spacing-page-x: clamp(48px, 8vw, 120px);
+    --sidebar-width: clamp(260px, 14vw, 320px);
+    --grid-gap: clamp(20px, 2vw, 36px);
+    --card-min-width: clamp(320px, 22vw, 450px);
+  }
+}
+
+/* 2K屏幕 - 2560px+ */
+@media (min-width: 2560px) {
+  :root {
+    --spacing-page-x: clamp(64px, 10vw, 200px);
+    --sidebar-width: clamp(280px, 12vw, 360px);
+    --card-min-width: clamp(350px, 18vw, 500px);
+  }
+}
+
+/* 响应式工具类 */
+.container-responsive {
+  width: 100%;
+  max-width: var(--content-max-lg);
+  margin-inline: auto;
+  padding-inline: var(--spacing-page-x);
+}
+
+.container-unlimited {
+  width: 100%;
+  padding-inline: var(--spacing-page-x);
+}
+
+.grid-auto-fit {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--card-min-width), 1fr));
+  gap: var(--grid-gap);
+}
+
+.grid-auto-fill {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min-width), 1fr));
+  gap: var(--grid-gap);
+}

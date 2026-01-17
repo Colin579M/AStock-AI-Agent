@@ -21,5 +21,12 @@ anyio>=4.0.0
 # Environment
 python-dotenv>=1.0.0
 
+# System Monitoring
+psutil>=5.9.0
+
+# TrendRadar Dependencies
+httpx>=0.25.0
+feedparser>=6.0.0
+
 # Note: TradingAgents dependencies (langchain, openai, etc.)
 # should be installed from the main project's requirements.txt

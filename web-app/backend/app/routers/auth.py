@@ -46,14 +46,16 @@ class UserInfo(BaseModel):
     """用户信息"""
     user_id: str
     name: str
+    role: str = "user"
     expires_at: Optional[str] = None
 
 
-def create_token(user_id: str, name: str) -> str:
+def create_token(user_id: str, name: str, role: str = "user") -> str:
     """创建 JWT token"""
     payload = {
         "user_id": user_id,
         "name": name,
+        "role": role,
         "exp": datetime.utcnow() + timedelta(hours=JWT_EXPIRE_HOURS),
         "iat": datetime.utcnow()
     }
@@ -73,6 +75,13 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) 
         raise HTTPException(status_code=401, detail="Token 已过期")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="无效的 Token")
+
+
+def require_admin(current_user: dict = Depends(verify_token)) -> dict:
+    """验证管理员权限"""
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    return current_user
 
 
 # 初始化认证服务
@@ -96,7 +105,7 @@ async def login(request: LoginRequest):
         )
 
     user = result["user"]
-    token = create_token(user["user_id"], user["name"])
+    token = create_token(user["user_id"], user["name"], user.get("role", "user"))
 
     # 记录登录
     is_first = auth_service.record_login(user["user_id"])
@@ -106,7 +115,8 @@ async def login(request: LoginRequest):
         token=token,
         user={
             "user_id": user["user_id"],
-            "name": user["name"]
+            "name": user["name"],
+            "role": user.get("role", "user")
         },
         is_first_login=is_first
     )
@@ -117,7 +127,8 @@ async def get_current_user(payload: dict = Depends(verify_token)):
     """获取当前用户信息"""
     return UserInfo(
         user_id=payload["user_id"],
-        name=payload["name"]
+        name=payload["name"],
+        role=payload.get("role", "user")
     )
 
 

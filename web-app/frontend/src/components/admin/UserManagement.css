@@ -1,0 +1,299 @@
+/* 用户管理页面 */
+
+.user-management {
+  width: 100%;
+  max-width: none;
+}
+
+/* 错误提示 */
+.error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: rgba(248, 81, 73, 0.1);
+  border: 1px solid rgba(248, 81, 73, 0.4);
+  border-radius: 8px;
+  color: #f85149;
+  margin-bottom: 20px;
+}
+
+.error-banner button {
+  background: none;
+  border: none;
+  color: #f85149;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+/* 加载状态 */
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  color: #7d8590;
+}
+
+.loading-state .spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid #30363d;
+  border-top-color: #238636;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-bottom: 12px;
+}
+
+/* 表格包装 */
+.table-wrapper {
+  overflow-x: auto;
+}
+
+/* 用户 ID 样式 */
+.user-id {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 13px;
+  color: #58a6ff;
+}
+
+/* 操作按钮组 */
+.action-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.action-buttons .admin-btn-icon {
+  padding: 6px;
+}
+
+.action-buttons .admin-btn-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.action-buttons .admin-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* 访问码显示 */
+.code-notice {
+  color: #d29922;
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+.code-display {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.code-display code {
+  flex: 1;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 16px;
+  color: #3fb950;
+  word-break: break-all;
+}
+
+.copy-btn {
+  background: none;
+  border: none;
+  color: #7d8590;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.copy-btn:hover {
+  background: #21262d;
+  color: #e6edf3;
+}
+
+.copy-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.code-user {
+  font-size: 14px;
+  color: #7d8590;
+  margin: 0;
+}
+
+/* 选择框样式调整 */
+.admin-select {
+  width: 100%;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%237d8590' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 36px;
+}
+
+/* 日期输入框 */
+input[type="datetime-local"].admin-input {
+  color-scheme: dark;
+}
+
+/* 响应式 */
+@media (max-width: 768px) {
+  .user-management {
+    padding: 0;
+  }
+
+  .table-wrapper {
+    margin: 0 -12px;
+    padding: 0 12px;
+  }
+
+  .admin-table th,
+  .admin-table td {
+    padding: 10px 8px;
+    font-size: 12px;
+  }
+
+  .admin-table th {
+    font-size: 10px;
+  }
+
+  /* 隐藏部分列 */
+  .admin-table th:nth-child(5),
+  .admin-table td:nth-child(5),
+  .admin-table th:nth-child(6),
+  .admin-table td:nth-child(6),
+  .admin-table th:nth-child(7),
+  .admin-table td:nth-child(7) {
+    display: none;
+  }
+
+  .user-id {
+    font-size: 11px;
+    max-width: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: block;
+  }
+
+  .status-badge {
+    font-size: 10px;
+    padding: 3px 6px;
+  }
+
+  .action-buttons {
+    gap: 4px;
+  }
+
+  .action-buttons .admin-btn-icon {
+    padding: 5px;
+  }
+
+  .action-buttons .admin-btn-icon svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  .code-display {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .code-display code {
+    font-size: 14px;
+    text-align: center;
+  }
+
+  .copy-btn {
+    align-self: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .admin-table th,
+  .admin-table td {
+    padding: 8px 6px;
+  }
+
+  /* 隐藏更多列 */
+  .admin-table th:nth-child(3),
+  .admin-table td:nth-child(3) {
+    display: none;
+  }
+
+  .user-id {
+    max-width: 60px;
+  }
+}
+
+/* ==================== PC大屏响应式 ==================== */
+
+@media (min-width: 1024px) {
+  .admin-table th,
+  .admin-table td {
+    padding: 14px 18px;
+  }
+
+  .user-id {
+    font-size: 14px;
+  }
+
+  .code-display {
+    padding: 20px;
+  }
+
+  .code-display code {
+    font-size: 18px;
+  }
+}
+
+@media (min-width: 1440px) {
+  .admin-table th,
+  .admin-table td {
+    padding: 16px 20px;
+  }
+}
+
+@media (min-width: 1920px) {
+  .admin-table th,
+  .admin-table td {
+    padding: 18px 24px;
+    font-size: 15px;
+  }
+
+  .admin-table th {
+    font-size: 13px;
+  }
+
+  .user-id {
+    font-size: 15px;
+  }
+
+  .action-buttons .admin-btn-icon {
+    padding: 8px;
+  }
+
+  .action-buttons .admin-btn-icon svg {
+    width: 16px;
+    height: 16px;
+  }
+}
+
+@media (min-width: 2560px) {
+  .admin-table th,
+  .admin-table td {
+    padding: 20px 28px;
+    font-size: 16px;
+  }
+}

@@ -1,0 +1,569 @@
+/**
+ * 历史报告页面样式
+ */
+
+.history-page {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  display: flex;
+  flex-direction: column;
+}
+
+/* 顶部导航栏 */
+.history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 24px;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+}
+
+.history-header h1 {
+  color: white;
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.history-header .back-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: white;
+  padding: 8px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s;
+}
+
+.history-header .back-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.history-header .header-spacer {
+  width: 80px;
+}
+
+/* 三栏布局 */
+.history-content {
+  flex: 1;
+  display: grid;
+  grid-template-columns: clamp(160px, 15vw, 240px) clamp(220px, 20vw, 340px) 1fr;
+  gap: var(--grid-gap, 16px);
+  padding: clamp(12px, 2vw, 24px);
+  min-height: 0;
+}
+
+/* 通用面板样式 */
+.stock-list-panel,
+.date-list-panel,
+.report-preview-panel {
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e5e7eb;
+  flex-shrink: 0;
+}
+
+.panel-header h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0;
+}
+
+.panel-header .count {
+  font-size: 13px;
+  color: #6b7280;
+  background: #f3f4f6;
+  padding: 4px 10px;
+  border-radius: 12px;
+}
+
+/* 紧凑型面板 */
+.stock-list-panel.compact {
+  height: auto;
+  min-height: auto;
+}
+
+.stock-list-panel.compact .search-box {
+  border-bottom: none;
+  padding: 16px;
+}
+
+.stock-list-panel.compact .stock-list {
+  border-top: 1px solid #e5e7eb;
+  max-height: 300px;
+}
+
+.no-result {
+  padding: 16px;
+  text-align: center;
+  color: #9ca3af;
+  font-size: 13px;
+}
+
+/* 搜索框 */
+.search-box {
+  padding: 12px 16px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.search-box input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.search-box input:focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+/* 列表通用 */
+.stock-list,
+.date-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.stock-list::-webkit-scrollbar,
+.date-list::-webkit-scrollbar,
+.report-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.stock-list::-webkit-scrollbar-thumb,
+.date-list::-webkit-scrollbar-thumb,
+.report-content::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+
+.stock-list::-webkit-scrollbar-thumb:hover,
+.date-list::-webkit-scrollbar-thumb:hover,
+.report-content::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* 股票列表项 */
+.stock-item {
+  padding: 12px 16px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.2s;
+  margin-bottom: 4px;
+}
+
+.stock-item:hover {
+  background: #f9fafb;
+}
+
+.stock-item.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.stock-item.active .stock-ticker,
+.stock-item.active .stock-meta {
+  color: white;
+}
+
+.stock-ticker {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 4px;
+}
+
+.stock-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+/* 日期列表项 */
+.date-item {
+  padding: 12px 16px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.2s;
+  margin-bottom: 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.date-item:hover {
+  background: #f9fafb;
+}
+
+.date-item.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.date-item.active .date-value {
+  color: white;
+}
+
+.date-item.active .report-badge {
+  background: rgba(255, 255, 255, 0.3);
+  color: white;
+}
+
+.date-value {
+  font-size: 15px;
+  font-weight: 500;
+  color: #1f2937;
+}
+
+.date-reports {
+  display: flex;
+  gap: 6px;
+}
+
+.report-badge {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.report-badge.final {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+/* 报告类型切换标签 */
+.report-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.tab-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: #f3f4f6;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 16px;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tab-btn:hover {
+  background: #e5e7eb;
+}
+
+.tab-btn.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+}
+
+/* 报告内容 */
+.report-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+.empty-state,
+.loading-state {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #9ca3af;
+}
+
+.empty-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.empty-hint {
+  font-size: 13px;
+  color: #9ca3af;
+  margin-top: 8px;
+}
+
+.loading-state .spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid #e5e7eb;
+  border-top-color: #667eea;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 16px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Markdown 内容 */
+.markdown-content {
+  line-height: 1.7;
+  color: #374151;
+}
+
+.markdown-content h1 {
+  font-size: 24px;
+  font-weight: 700;
+  color: #111827;
+  margin: 0 0 20px 0;
+  padding-bottom: 12px;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+.markdown-content h2 {
+  font-size: 20px;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 28px 0 14px 0;
+}
+
+.markdown-content h3 {
+  font-size: 17px;
+  font-weight: 600;
+  color: #374151;
+  margin: 20px 0 10px 0;
+}
+
+.markdown-content p {
+  margin: 12px 0;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  margin: 12px 0;
+  padding-left: 24px;
+}
+
+.markdown-content li {
+  margin: 6px 0;
+}
+
+.markdown-content strong {
+  color: #111827;
+  font-weight: 600;
+}
+
+.markdown-content code {
+  background: #f3f4f6;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  color: #dc2626;
+}
+
+.markdown-content blockquote {
+  margin: 16px 0;
+  padding: 12px 20px;
+  border-left: 4px solid #667eea;
+  background: #f8fafc;
+  border-radius: 0 8px 8px 0;
+}
+
+/* 表格样式 */
+.markdown-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 20px 0;
+  font-size: 14px;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+}
+
+.markdown-content th {
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  font-weight: 600;
+  color: #1e293b;
+  text-align: left;
+  padding: 14px 16px;
+  border-bottom: 2px solid #e2e8f0;
+}
+
+.markdown-content td {
+  padding: 12px 16px;
+  border-bottom: 1px solid #e2e8f0;
+  vertical-align: top;
+}
+
+.markdown-content tr:nth-child(even) td {
+  background: #f8fafc;
+}
+
+.markdown-content tr:hover td {
+  background: #eef2ff;
+}
+
+.markdown-content td:first-child {
+  font-weight: 500;
+  color: #334155;
+}
+
+/* 表格移动端响应式 - 保持表格格式 */
+@media (max-width: 768px) {
+  .markdown-content table {
+    font-size: 12px;
+  }
+
+  .markdown-content th,
+  .markdown-content td {
+    padding: 10px 12px;
+  }
+
+  .markdown-content th {
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 480px) {
+  .markdown-content table {
+    font-size: 11px;
+  }
+
+  .markdown-content th,
+  .markdown-content td {
+    padding: 8px 10px;
+  }
+
+  .markdown-content th {
+    font-size: 10px;
+  }
+}
+
+/* 空白和加载状态 */
+.loading,
+.empty {
+  padding: 40px;
+  text-align: center;
+  color: #9ca3af;
+  font-size: 14px;
+}
+
+/* 响应式适配 */
+@media (max-width: 1200px) {
+  .history-content {
+    grid-template-columns: 180px 240px 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .history-content {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto 1fr;
+  }
+
+  .stock-list-panel.compact {
+    max-height: none;
+  }
+
+  .stock-list-panel.compact .stock-list {
+    max-height: 150px;
+  }
+
+  .date-list-panel {
+    max-height: 200px;
+  }
+}
+
+/* ==================== PC大屏响应式 ==================== */
+
+/* 大桌面 - 1280px+ */
+@media (min-width: 1280px) {
+  .history-content {
+    grid-template-columns: clamp(180px, 14vw, 260px) clamp(260px, 18vw, 380px) 1fr;
+    gap: clamp(16px, 2vw, 28px);
+    padding: clamp(16px, 2.5vw, 32px);
+  }
+
+  .panel-header {
+    padding: 18px 24px;
+  }
+
+  .panel-header h2 {
+    font-size: 17px;
+  }
+}
+
+/* 全高清 - 1920px+ */
+@media (min-width: 1920px) {
+  .history-header {
+    padding: 20px 32px;
+  }
+
+  .history-header h1 {
+    font-size: 24px;
+  }
+
+  .history-content {
+    grid-template-columns: clamp(200px, 12vw, 280px) clamp(300px, 16vw, 420px) 1fr;
+    gap: clamp(20px, 2vw, 32px);
+    padding: clamp(20px, 3vw, 40px);
+  }
+
+  .stock-list-panel,
+  .date-list-panel,
+  .report-preview-panel {
+    border-radius: 20px;
+  }
+
+  .panel-header {
+    padding: 20px 28px;
+  }
+
+  .panel-header h2 {
+    font-size: 18px;
+  }
+
+  .markdown-content {
+    font-size: 15px;
+  }
+
+  .markdown-content table {
+    font-size: 14px;
+  }
+}
+
+/* 2K屏幕 - 2560px+ */
+@media (min-width: 2560px) {
+  .history-content {
+    grid-template-columns: clamp(220px, 10vw, 320px) clamp(340px, 14vw, 480px) 1fr;
+    gap: 36px;
+    padding: clamp(24px, 3vw, 48px);
+  }
+
+  .panel-header {
+    padding: 24px 32px;
+  }
+
+  .panel-header h2 {
+    font-size: 20px;
+  }
+}

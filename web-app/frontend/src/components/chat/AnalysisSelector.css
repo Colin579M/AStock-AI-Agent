@@ -1,0 +1,247 @@
+/**
+ * 分析维度选择器样式
+ */
+
+.analysis-selector {
+  background: var(--card-background, #1e1e2e);
+  border-radius: 12px;
+  padding: clamp(16px, 2.5vw, 28px);
+  max-width: var(--content-max-sm, clamp(500px, 60vw, 800px));
+  margin: 0 auto;
+}
+
+.analysis-selector-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.analysis-selector-header h3 {
+  margin: 0;
+  font-size: 1.2rem;
+  color: var(--text-primary, #e0e0e0);
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  color: var(--text-secondary, #888);
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.close-btn:hover {
+  color: var(--text-primary, #e0e0e0);
+}
+
+/* 快捷选项 */
+.quick-options {
+  margin-bottom: 20px;
+}
+
+.section-label {
+  font-size: 0.9rem;
+  color: var(--text-secondary, #888);
+  margin: 0 0 8px 0;
+}
+
+.quick-options-grid {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.quick-option-btn {
+  background: var(--button-secondary, #2a2a3a);
+  border: 1px solid var(--border-color, #3a3a4a);
+  border-radius: 20px;
+  padding: 8px 16px;
+  color: var(--text-primary, #e0e0e0);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.quick-option-btn:hover {
+  background: var(--button-hover, #3a3a4a);
+  border-color: var(--accent-color, #6366f1);
+}
+
+/* 维度选择 */
+.dimension-selection {
+  margin-bottom: 20px;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.selection-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.text-btn {
+  background: none;
+  border: none;
+  color: var(--accent-color, #6366f1);
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.text-btn:hover {
+  text-decoration: underline;
+}
+
+.dimensions-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+@media (max-width: 500px) {
+  .dimensions-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dimension-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 12px;
+  background: var(--button-secondary, #2a2a3a);
+  border: 2px solid var(--border-color, #3a3a4a);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+}
+
+.dimension-btn:hover {
+  border-color: var(--accent-color, #6366f1);
+}
+
+.dimension-btn.selected {
+  background: var(--accent-color-light, rgba(99, 102, 241, 0.1));
+  border-color: var(--accent-color, #6366f1);
+}
+
+.dimension-icon {
+  font-size: 1.2rem;
+  margin-bottom: 4px;
+}
+
+.dimension-name {
+  font-weight: 600;
+  color: var(--text-primary, #e0e0e0);
+  font-size: 0.95rem;
+}
+
+.dimension-desc {
+  font-size: 0.8rem;
+  color: var(--text-secondary, #888);
+  margin-top: 2px;
+}
+
+/* 操作按钮 */
+.action-buttons {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.analyze-btn {
+  flex: 1;
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.analyze-btn.primary {
+  background: var(--accent-color, #6366f1);
+  border: none;
+  color: white;
+}
+
+.analyze-btn.primary:hover:not(:disabled) {
+  background: var(--accent-color-hover, #5254cc);
+}
+
+.analyze-btn.primary:disabled {
+  background: var(--button-disabled, #4a4a5a);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.analyze-btn.secondary {
+  background: var(--button-secondary, #2a2a3a);
+  border: 1px solid var(--border-color, #3a3a4a);
+  color: var(--text-primary, #e0e0e0);
+}
+
+.analyze-btn.secondary:hover {
+  background: var(--button-hover, #3a3a4a);
+}
+
+/* 提示 */
+.tip {
+  font-size: 0.85rem;
+  color: var(--text-secondary, #888);
+  text-align: center;
+}
+
+.tip code {
+  background: var(--code-background, #2a2a3a);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: monospace;
+  color: var(--accent-color, #6366f1);
+}
+
+/* ==================== PC大屏响应式 ==================== */
+
+@media (min-width: 1024px) {
+  .analysis-selector {
+    max-width: clamp(600px, 55vw, 900px);
+    padding: clamp(24px, 3vw, 36px);
+  }
+
+  .dimensions-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (min-width: 1440px) {
+  .dimensions-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (min-width: 1920px) {
+  .analysis-selector {
+    max-width: clamp(700px, 45vw, 1000px);
+    padding: clamp(28px, 3vw, 44px);
+    border-radius: 16px;
+  }
+}
+
+@media (min-width: 2560px) {
+  .analysis-selector {
+    max-width: clamp(800px, 40vw, 1100px);
+  }
+
+  .dimensions-grid {
+    gap: 16px;
+  }
+}

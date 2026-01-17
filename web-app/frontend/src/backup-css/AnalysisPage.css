@@ -1,0 +1,653 @@
+/* 分析页面样式 - 移动端优先 */
+
+.analysis-page {
+  min-height: 100vh;
+  background: #f5f7fa;
+}
+
+.analysis-header {
+  background: #1a1a2e;
+  color: white;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.analysis-header h1 {
+  font-size: 18px;
+  margin: 0;
+}
+
+.back-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: white;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+/* 输入区域 */
+.input-section {
+  padding: 24px 20px;
+  background: white;
+  margin: 16px;
+  border-radius: 16px;
+}
+
+.input-hint {
+  font-size: 14px;
+  color: #666;
+  margin: 0 0 16px 0;
+}
+
+.input-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.ticker-input {
+  width: 120px;
+  padding: 12px;
+  font-size: 16px;
+  border: 2px solid #e0e0e0;
+  border-radius: 10px;
+  font-family: monospace;
+}
+
+.name-input {
+  flex: 1;
+  padding: 12px;
+  font-size: 16px;
+  border: 2px solid #e0e0e0;
+  border-radius: 10px;
+}
+
+.ticker-input:focus,
+.name-input:focus {
+  outline: none;
+  border-color: #4a90d9;
+}
+
+.error-message {
+  background: #fee2e2;
+  color: #dc2626;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+.start-btn {
+  width: 100%;
+  padding: 14px;
+  font-size: 16px;
+  font-weight: 600;
+  color: white;
+  background: linear-gradient(135deg, #4a90d9 0%, #357abd 100%);
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.start-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(74, 144, 217, 0.4);
+}
+
+/* 进度区域 */
+.progress-section {
+  padding: 16px;
+}
+
+/* 当前状态卡片 */
+.current-step-card {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  color: white;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.current-step-indicator {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.spinner.large {
+  width: 24px;
+  height: 24px;
+  border-width: 3px;
+  border-color: rgba(255, 255, 255, 0.4);
+  border-top-color: #4ade80;
+}
+
+.current-step-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.current-step-label {
+  font-size: 11px;
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.current-step-name {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.current-step-hint {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  margin-top: 4px;
+}
+
+.current-step-ticker {
+  font-size: 14px;
+  font-family: monospace;
+  background: rgba(255, 255, 255, 0.15);
+  padding: 6px 12px;
+  border-radius: 6px;
+}
+
+/* 进度条 */
+.progress-bar-container {
+  background: white;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.progress-bar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1a1a2e;
+}
+
+.progress-percent {
+  color: #4a90d9;
+  font-family: monospace;
+}
+
+.progress-bar {
+  height: 8px;
+  background: #e5e7eb;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4a90d9 0%, #22c55e 100%);
+  border-radius: 4px;
+  transition: width 0.5s ease-out;
+}
+
+/* 团队分组进度 */
+.teams-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.team-card {
+  background: white;
+  border-radius: 12px;
+  padding: 14px;
+  border-left: 4px solid #e5e7eb;
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.team-card.active {
+  border-left-color: #4a90d9;
+  box-shadow: 0 2px 8px rgba(74, 144, 217, 0.15);
+}
+
+.team-card.done {
+  border-left-color: #22c55e;
+}
+
+.team-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.team-icon {
+  font-size: 18px;
+}
+
+.team-name {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1a1a2e;
+}
+
+.team-count {
+  font-size: 12px;
+  font-family: monospace;
+  color: #666;
+  background: #f0f0f0;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.team-card.done .team-count {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.team-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.step-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 0;
+}
+
+.step-icon {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+}
+
+.step-item.done .step-icon {
+  color: #22c55e;
+  font-weight: bold;
+}
+
+.step-item.current .step-icon {
+  color: #4a90d9;
+}
+
+.step-item.pending .step-icon {
+  color: #ccc;
+}
+
+/* Spinner 动画 */
+.spinner {
+  display: block;
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  border: 2px solid #6b7280;
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.step-name {
+  flex: 1;
+  font-size: 13px;
+  color: #333;
+  margin-left: 6px;
+}
+
+.step-item.pending .step-name {
+  color: #999;
+}
+
+.step-status {
+  font-size: 11px;
+  color: #4a90d9;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* 日志区域 */
+.logs-section {
+  background: white;
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.logs-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #f5f7fa;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.logs-header h4 {
+  font-size: 13px;
+  color: #666;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.logs-header h4::before {
+  content: '>';
+  color: #22c55e;
+  font-family: monospace;
+}
+
+.logs-count {
+  font-size: 11px;
+  color: #999;
+  font-family: monospace;
+}
+
+.logs-container {
+  background: #1a1a2e;
+  padding: 12px 16px;
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.log-line {
+  color: #a0d8a0;
+  padding: 2px 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.log-line:nth-child(odd) {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* 日志类型颜色 */
+.log-line.tool {
+  color: #60a5fa;
+}
+
+.log-line.error {
+  color: #f87171;
+}
+
+.log-line.success {
+  color: #4ade80;
+}
+
+/* 结果区域 */
+.result-container {
+  padding: 20px;
+}
+
+.result-header {
+  margin-bottom: 20px;
+}
+
+.result-header h2 {
+  font-size: 20px;
+  color: #1a1a2e;
+  margin: 0 0 8px 0;
+}
+
+.ticker-code {
+  font-size: 14px;
+  color: #666;
+  font-weight: normal;
+  margin-left: 8px;
+}
+
+.result-date {
+  font-size: 12px;
+  color: #999;
+  margin: 0;
+}
+
+/* 决策卡片 */
+.decision-card {
+  background: #dcfce7;
+  border-radius: 16px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.decision-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.decision-label {
+  font-size: 14px;
+  opacity: 0.8;
+}
+
+.decision-value {
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.decision-detail {
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+  padding: 8px 0;
+  border-top: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+/* 报告区域 */
+.report-section {
+  background: white;
+  border-radius: 16px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.main-report {
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.main-report h1,
+.main-report h2,
+.main-report h3 {
+  font-size: 16px;
+  color: #1a1a2e;
+  margin: 16px 0 8px 0;
+}
+
+.main-report h1:first-child,
+.main-report h2:first-child {
+  margin-top: 0;
+}
+
+.main-report p {
+  margin: 8px 0;
+  color: #444;
+}
+
+.main-report ul,
+.main-report ol {
+  padding-left: 20px;
+  margin: 8px 0;
+}
+
+.main-report li {
+  margin: 4px 0;
+  color: #444;
+}
+
+.main-report table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 13px;
+}
+
+.main-report th,
+.main-report td {
+  border: 1px solid #e0e0e0;
+  padding: 8px;
+  text-align: left;
+}
+
+.main-report th {
+  background: #f5f7fa;
+}
+
+/* 详细报告折叠 */
+.detailed-reports {
+  margin-bottom: 20px;
+}
+
+.detailed-reports h3 {
+  font-size: 14px;
+  color: #666;
+  margin: 0 0 12px 0;
+}
+
+.report-item {
+  background: white;
+  border-radius: 12px;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+
+.report-toggle {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  background: white;
+  border: none;
+  font-size: 14px;
+  color: #333;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.report-toggle:hover {
+  background: #f5f7fa;
+}
+
+.toggle-icon {
+  font-size: 10px;
+  color: #999;
+}
+
+.report-content {
+  padding: 16px;
+  border-top: 1px solid #f0f0f0;
+  font-size: 13px;
+  line-height: 1.6;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.report-content h1,
+.report-content h2,
+.report-content h3 {
+  font-size: 14px;
+  margin: 12px 0 8px 0;
+}
+
+.report-content p {
+  margin: 8px 0;
+}
+
+.report-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 12px;
+}
+
+.report-content th,
+.report-content td {
+  border: 1px solid #e0e0e0;
+  padding: 6px;
+}
+
+/* 操作按钮 */
+.result-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.action-btn {
+  flex: 1;
+  padding: 14px;
+  font-size: 14px;
+  font-weight: 600;
+  border: 2px solid #4a90d9;
+  border-radius: 10px;
+  background: white;
+  color: #4a90d9;
+  cursor: pointer;
+}
+
+.action-btn:hover {
+  background: #4a90d9;
+  color: white;
+}
+
+/* 取消按钮 */
+.cancel-btn {
+  width: 100%;
+  padding: 14px;
+  margin-top: 20px;
+  font-size: 14px;
+  font-weight: 600;
+  border: 2px solid #ef4444;
+  border-radius: 10px;
+  background: white;
+  color: #ef4444;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.cancel-btn:hover {
+  background: #ef4444;
+  color: white;
+}
+
+.cancel-btn:active {
+  transform: scale(0.98);
+}

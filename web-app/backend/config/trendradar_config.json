@@ -1,0 +1,48 @@
+{
+  "version": "1.0.0",
+  "description": "TrendRadar 热点监控配置",
+
+  "platforms": [
+    {"id": "toutiao", "name": "今日头条", "enabled": true},
+    {"id": "baidu", "name": "百度热搜", "enabled": true},
+    {"id": "wallstreetcn-hot", "name": "华尔街见闻", "enabled": true},
+    {"id": "thepaper", "name": "澎湃新闻", "enabled": true},
+    {"id": "bilibili-hot-search", "name": "B站热搜", "enabled": true},
+    {"id": "cls-hot", "name": "财联社热门", "enabled": true},
+    {"id": "ifeng", "name": "凤凰网", "enabled": true},
+    {"id": "tieba", "name": "贴吧", "enabled": true},
+    {"id": "weibo", "name": "微博", "enabled": true},
+    {"id": "douyin", "name": "抖音", "enabled": true},
+    {"id": "zhihu", "name": "知乎", "enabled": true}
+  ],
+
+  "rss_feeds": [
+    {
+      "id": "hacker-news",
+      "name": "Hacker News",
+      "url": "https://hnrss.org/frontpage",
+      "enabled": true,
+      "max_age_days": 1
+    },
+    {
+      "id": "ruanyifeng",
+      "name": "阮一峰的网络日志",
+      "url": "http://www.ruanyifeng.com/blog/atom.xml",
+      "enabled": true,
+      "max_age_days": 7
+    }
+  ],
+
+  "cache": {
+    "hotlist_ttl_seconds": 300,
+    "rss_ttl_seconds": 900,
+    "ai_ttl_seconds": 1800
+  },
+
+  "ai_analysis": {
+    "provider": "deepseek",
+    "model": "deepseek-chat",
+    "max_news": 50,
+    "timeout": 90
+  }
+}

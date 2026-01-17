@@ -19,8 +19,8 @@ services:
     volumes:
       # 挂载 tradingagents 模块
       - ../tradingagents:/app/tradingagents:ro
-      # 挂载配置文件
-      - ./config:/app/config:ro
+      # 挂载配置文件（需要写入 admin_logs.json, api_stats.json）
+      - ./config:/app/config
       # 挂载数据目录（results, chroma_db）
       - ../results:/app/results
       - ../chroma_db:/app/chroma_db

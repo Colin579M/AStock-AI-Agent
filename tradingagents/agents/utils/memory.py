@@ -162,6 +162,31 @@ class FinancialSituationMemory:
         elif config.get("backend_url") == "http://localhost:11434/v1":
             self.embedding = "nomic-embed-text"
             self.client = OpenAI(base_url=config["backend_url"])
+        elif self.llm_provider == "anthropic":
+            # Anthropic 没有 Embedding API，使用 DashScope 或 OpenAI
+            dashscope_key = os.getenv('DASHSCOPE_API_KEY')
+            openai_key = os.getenv('OPENAI_API_KEY')
+
+            if DASHSCOPE_AVAILABLE and _is_valid_api_key(dashscope_key):
+                self.embedding = "text-embedding-v3"
+                self.client = None
+                dashscope.api_key = dashscope_key
+                logger.info("Anthropic 模式: 使用 DashScope embedding 服务")
+            elif _is_valid_api_key(openai_key):
+                self.embedding = "text-embedding-3-small"
+                self.client = OpenAI(api_key=openai_key, base_url="https://api.openai.com/v1")
+                logger.info("Anthropic 模式: 使用 OpenAI embedding 服务")
+            else:
+                # 禁用 Memory 功能
+                logger.warning(
+                    "Anthropic 没有 Embedding API，Memory 功能已禁用。\n"
+                    "建议配置以下任一环境变量以启用 Memory 功能：\n"
+                    "1. DASHSCOPE_API_KEY（推荐，国内可访问）\n"
+                    "2. OPENAI_API_KEY（需要能访问 OpenAI）"
+                )
+                self.embedding = None
+                self.client = None
+                self._disabled = True
         else:
             self.embedding = "text-embedding-3-small"
             self.client = OpenAI(base_url=config["backend_url"])

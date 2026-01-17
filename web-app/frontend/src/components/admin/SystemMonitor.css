@@ -1,0 +1,431 @@
+/* 系统监控页面 */
+
+.system-monitor {
+  width: 100%;
+  max-width: none;
+}
+
+/* 状态卡片网格 */
+.status-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(clamp(220px, 20vw, 300px), 1fr));
+  gap: var(--grid-gap, 16px);
+  margin-bottom: clamp(20px, 3vw, 32px);
+}
+
+.status-card {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.status-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.status-card-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.status-card-icon svg {
+  width: 20px;
+  height: 20px;
+  color: white;
+}
+
+.status-card-icon.backend {
+  background: linear-gradient(135deg, #238636 0%, #2ea043 100%);
+}
+
+.status-card-icon.chatbot {
+  background: linear-gradient(135deg, #58a6ff 0%, #388bfd 100%);
+}
+
+.status-card-icon.memory {
+  background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%);
+}
+
+.status-card-icon.cpu {
+  background: linear-gradient(135deg, #f97316 0%, #fb923c 100%);
+}
+
+.status-card-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #7d8590;
+}
+
+.status-card-value {
+  font-size: 24px;
+  font-weight: 600;
+  color: #e6edf3;
+  margin-bottom: 8px;
+}
+
+.status-card-detail {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #7d8590;
+}
+
+/* 进度条 */
+.progress-bar {
+  flex: 1;
+  height: 6px;
+  background: #30363d;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #238636 0%, #3fb950 100%);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.progress-fill.cpu-fill {
+  background: linear-gradient(90deg, #f97316 0%, #fb923c 100%);
+}
+
+/* 统计网格 */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  padding: 20px 0;
+  border-bottom: 1px solid #30363d;
+  margin-bottom: 20px;
+}
+
+.stats-item {
+  text-align: center;
+}
+
+.stats-value {
+  font-size: 32px;
+  font-weight: 600;
+  color: #e6edf3;
+  margin-bottom: 4px;
+}
+
+.stats-value.error {
+  color: #f85149;
+}
+
+.stats-label {
+  font-size: 14px;
+  color: #7d8590;
+}
+
+.stats-date {
+  font-size: 14px;
+  color: #7d8590;
+}
+
+/* 端点统计 */
+.endpoint-stats,
+.user-stats {
+  margin-top: 20px;
+}
+
+.endpoint-stats h3,
+.user-stats h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #7d8590;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 12px 0;
+}
+
+.endpoint-list,
+.user-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.endpoint-item,
+.user-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: #0d1117;
+  border-radius: 8px;
+}
+
+.endpoint-name {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 13px;
+  color: #58a6ff;
+}
+
+.endpoint-count,
+.user-count {
+  font-size: 14px;
+  font-weight: 500;
+  color: #e6edf3;
+}
+
+.user-name {
+  font-size: 14px;
+  color: #e6edf3;
+}
+
+/* 刷新区域 */
+.refresh-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.refresh-hint {
+  font-size: 13px;
+  color: #7d8590;
+}
+
+/* 加载状态 */
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 100px 20px;
+  color: #7d8590;
+}
+
+.loading-state .spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid #30363d;
+  border-top-color: #238636;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-bottom: 12px;
+}
+
+/* 错误提示 */
+.error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: rgba(248, 81, 73, 0.1);
+  border: 1px solid rgba(248, 81, 73, 0.4);
+  border-radius: 8px;
+  color: #f85149;
+  margin-bottom: 20px;
+}
+
+.error-banner button {
+  background: none;
+  border: none;
+  color: #f85149;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+@media (max-width: 768px) {
+  .system-monitor {
+    padding: 0;
+  }
+
+  .status-cards {
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .status-card {
+    padding: 16px;
+    border-radius: 10px;
+  }
+
+  .status-card-header {
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .status-card-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+  }
+
+  .status-card-icon svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .status-card-title {
+    font-size: 12px;
+  }
+
+  .status-card-value {
+    font-size: 20px;
+    margin-bottom: 6px;
+  }
+
+  .status-card-detail {
+    font-size: 11px;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    padding: 16px 0;
+  }
+
+  .stats-value {
+    font-size: 24px;
+  }
+
+  .stats-label {
+    font-size: 12px;
+  }
+
+  .endpoint-item,
+  .user-item {
+    padding: 8px 10px;
+  }
+
+  .endpoint-name {
+    font-size: 11px;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .endpoint-count,
+  .user-count {
+    font-size: 13px;
+  }
+
+  .refresh-section {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    margin-top: 20px;
+  }
+
+  .refresh-section .admin-btn {
+    justify-content: center;
+  }
+
+  .refresh-hint {
+    text-align: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .status-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .stats-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid #30363d;
+  }
+
+  .stats-item:last-child {
+    border-bottom: none;
+  }
+
+  .stats-value {
+    font-size: 20px;
+    margin-bottom: 0;
+  }
+
+  .stats-label {
+    font-size: 13px;
+  }
+}
+
+/* ==================== PC大屏响应式 ==================== */
+
+@media (min-width: 1024px) {
+  .status-cards {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+  }
+
+  .stats-value {
+    font-size: 36px;
+  }
+}
+
+@media (min-width: 1440px) {
+  .status-card {
+    padding: 24px;
+  }
+
+  .status-card-value {
+    font-size: 28px;
+  }
+
+  .stats-value {
+    font-size: 40px;
+  }
+}
+
+@media (min-width: 1920px) {
+  .status-cards {
+    gap: 24px;
+  }
+
+  .status-card {
+    padding: 28px;
+    border-radius: 14px;
+  }
+
+  .status-card-value {
+    font-size: 32px;
+  }
+
+  .stats-value {
+    font-size: 44px;
+  }
+
+  .endpoint-item,
+  .user-item {
+    padding: 14px 16px;
+  }
+}
+
+@media (min-width: 2560px) {
+  .status-cards {
+    grid-template-columns: repeat(5, 1fr);
+    gap: 28px;
+  }
+
+  .status-card {
+    padding: 32px;
+  }
+}

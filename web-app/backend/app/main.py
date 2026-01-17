@@ -26,7 +26,7 @@ if env_file.exists():
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import auth, chat, analysis
+from app.routers import auth, chat, analysis, admin, trendradar
 
 
 @asynccontextmanager
@@ -59,6 +59,8 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/auth", tags=["认证"])
 app.include_router(chat.router, prefix="/api/chat", tags=["对话"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["分析"])
+app.include_router(admin.router, prefix="/api/admin", tags=["管理"])
+app.include_router(trendradar.router, prefix="/api/trendradar", tags=["热点监控"])
 
 
 @app.get("/")
@@ -70,7 +72,9 @@ async def root():
         "endpoints": {
             "auth": "/api/auth",
             "chat": "/api/chat",
-            "analysis": "/api/analysis"
+            "analysis": "/api/analysis",
+            "admin": "/api/admin",
+            "trendradar": "/api/trendradar"
         }
     }
 
