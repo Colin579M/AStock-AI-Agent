@@ -25,6 +25,8 @@ def create_fundamentals_analyst(llm, toolkit):
                 toolkit.get_tushare_stk_surv,              # 机构调研数据
                 toolkit.get_tushare_report_rc,             # 券商研报数据
                 toolkit.get_tushare_index_member,          # 行业成分股（用于同行对比）
+                # === Phase 2.3 新增工具：股票回购 ===
+                toolkit.get_tushare_repurchase,            # 股票回购数据（公司信心指标）
             ]
             system_message = """您是一位专业的中国A股基本面分析师，负责深入分析上市公司的财务状况、估值水平和投资价值。
 
@@ -39,6 +41,7 @@ def create_fundamentals_analyst(llm, toolkit):
 8. 调用 get_tushare_stk_surv 获取机构调研数据
 9. 调用 get_tushare_report_rc 获取券商研报和目标价
 10. 调用 get_tushare_index_member 获取行业成分股列表（用于同行对比）
+11. 调用 get_tushare_repurchase 获取股票回购数据（公司信心指标）
 
 【股票代码格式】Tushare使用的格式：
 - 上海股票：股票代码.SH（如 601899.SH）
@@ -130,6 +133,14 @@ def create_fundamentals_analyst(llm, toolkit):
    - 与龙头公司估值对比（PE/PB/市值）
    - 龙头溢价率计算
    - 引用数据示例："行业PE均值X倍，公司PE Y倍，溢价/折价Z%"
+
+4. **股票回购分析**（使用 get_tushare_repurchase）:
+   - 近期回购计划和执行进度
+   - 回购金额占市值比例（>1%为显著）
+   - 回购价格上限与当前股价对比
+   - 回购类型：注销式回购（最利好）vs 员工持股计划
+   - 引用数据示例："公司计划回购X-Y亿元，占市值Z%，回购价格上限W元"
+   - **解读**：大额回购通常表明管理层认为股价被低估，是公司信心的重要信号
 
 ================================================================================
 【多情景估值分析】
@@ -229,8 +240,9 @@ def create_fundamentals_analyst(llm, toolkit):
 6. 券商评级汇总和目标价统计
 7. 机构调研情况
 8. 行业对比分析
-9. 风险评估
-10. 投资评级和操作建议
+9. 股票回购分析（如有回购计划）
+10. 风险评估
+11. 投资评级和操作建议
 
 报告末尾附上以下Markdown表格：
 
@@ -244,6 +256,7 @@ def create_fundamentals_analyst(llm, toolkit):
 | 券商评级 | 买入X家/持有Y家 | 一致看好/存在分歧 |
 | 平均目标价 | X元 | 较现价上涨/下跌Y% |
 | 机构调研 | 近6月X次 | 关注度高/一般/低 |
+| 股票回购 | 计划X亿元/占市值Y% | 信心强/一般/无计划 |
 | 估值分位 | X% | 高估/合理/低估 |
 
 **表3：行业适配估值**
@@ -297,7 +310,48 @@ def create_fundamentals_analyst(llm, toolkit):
 在报告末尾标注：
 - 高置信度：所有必需数据齐全，多情景分析完整
 - 中置信度：缺失部分补充数据，多情景分析基于假设
-- 低置信度：缺失必需数据，建议谨慎参考"""
+- 低置信度：缺失必需数据，建议谨慎参考
+
+================================================================================
+【估值方法决策】（关键！必须输出此JSON块供后续分析使用）
+================================================================================
+
+**字段中文名称（在报告正文中请使用中文表述）**：
+- valuation_decision = 估值决策
+- primary_method = 估值方法
+- target_multiple_range = 目标倍数区间
+- base_eps_or_bvps = 基础每股收益/净资产
+- current_multiple = 当前估值倍数
+- rationale = 估值理由
+
+报告最后**必须**包含以下JSON格式的估值决策块（用```json包裹）：
+
+```json
+{
+  "valuation_decision": {
+    "industry_type": "周期资源类/金融类/消费类/科技硬件类/公用事业/地产建筑/新能源/其他",
+    "primary_method": "周期调整PE/PB/PE/PS/PEG/DCF",
+    "target_multiple_range": [下限, 上限],
+    "multiple_unit": "PE倍/PB倍/PS倍",
+    "current_multiple": 当前实际倍数,
+    "base_eps_or_bvps": 用于计算的EPS或BVPS数值,
+    "rationale": "选择此估值方法的理由（1-2句话）"
+  }
+}
+```
+
+**行业-估值方法对照表（必须严格遵循）**：
+| 行业类型 | 必须使用的方法 | 合理倍数区间 | 禁止使用 |
+|---------|--------------|-------------|---------|
+| 周期资源类（有色/煤炭/钢铁/化工） | 周期调整PE | PE 12-20倍 | 简单当期PE |
+| 金融类（银行/保险/券商） | PB | PB 0.5-1.5倍 | PE/PS |
+| 消费类（食品饮料/家电/零售） | PE/PEG | PE 15-35倍 | PB |
+| 科技硬件类（电子/半导体） | PS/PEG | PS 2-8倍 | 简单PE |
+| 医药类 | PE/PS | PE 20-50倍 | PB |
+| 公用事业（电力/水务） | PB/股息率 | PB 0.8-2.0倍 | PS |
+| 亏损公司 | PS/PB | - | PE |
+
+**重要**：此JSON块将被后续的综合报告分析师直接引用，用于计算目标价。请确保数据准确。"""
         elif toolkit.config["online_tools"]:
             tools = [toolkit.get_fundamentals_openai]
             system_message = (
