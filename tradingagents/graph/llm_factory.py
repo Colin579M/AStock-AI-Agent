@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 # 延迟导入适配器，避免强制依赖
 _DASHSCOPE_ADAPTER = None
 _OPENAI_RESPONSES_ADAPTER = None
+_DEEPSEEK_REASONER_ADAPTER = None
 _adapter_lock = threading.Lock()  # 线程安全锁
 
 
@@ -53,6 +54,20 @@ def _get_openai_responses_adapter():
                 _OPENAI_RESPONSES_ADAPTER = False
                 logger.debug("OpenAI Responses adapter not available, will use Chat Completions API")
         return _OPENAI_RESPONSES_ADAPTER if _OPENAI_RESPONSES_ADAPTER else None
+
+
+def _get_deepseek_reasoner_adapter():
+    """延迟加载 DeepSeek Reasoner 适配器（线程安全）"""
+    global _DEEPSEEK_REASONER_ADAPTER
+    with _adapter_lock:
+        if _DEEPSEEK_REASONER_ADAPTER is None:
+            try:
+                from tradingagents.llm_adapters.deepseek_reasoner_adapter import ChatDeepSeekReasoner
+                _DEEPSEEK_REASONER_ADAPTER = ChatDeepSeekReasoner
+            except ImportError:
+                _DEEPSEEK_REASONER_ADAPTER = False
+                logger.debug("DeepSeek Reasoner adapter not available, will use ChatOpenAI")
+        return _DEEPSEEK_REASONER_ADAPTER if _DEEPSEEK_REASONER_ADAPTER else None
 
 
 def create_llm(config: Dict[str, Any], llm_type: str = "deep"):
@@ -120,14 +135,30 @@ def create_llm_pair(config: Dict[str, Any]) -> Tuple[Any, Any]:
 
 def _create_openai_llm(config: Dict[str, Any], model_name: str, backend_url: str, llm_type: str):
     """创建 OpenAI LLM 实例"""
-    # 检测是否是 DeepSeek 或其他不支持 Responses API 的服务
-    # DeepSeek 只支持 Chat Completions API，直接使用 ChatOpenAI
+    # 检测是否是 DeepSeek
     is_deepseek = backend_url and "deepseek" in backend_url.lower()
+    is_reasoner = model_name and "reasoner" in model_name.lower()
 
     # 从 config 获取 max_tokens，默认 2000（平衡速度和能力）
     max_tokens = config.get('max_tokens', 2000)
 
     if is_deepseek:
+        # DeepSeek Reasoner 需要特殊适配器处理 reasoning_content
+        if is_reasoner:
+            ChatDeepSeekReasoner = _get_deepseek_reasoner_adapter()
+            if ChatDeepSeekReasoner:
+                # Reasoner 模式需要更多 tokens（thinking + output）
+                reasoner_max_tokens = max(max_tokens, 8000)
+                logger.info(f"检测到 DeepSeek Reasoner，使用专用适配器: {model_name}, max_tokens={reasoner_max_tokens}")
+                return ChatDeepSeekReasoner(
+                    model=model_name,
+                    base_url=backend_url,
+                    max_tokens=reasoner_max_tokens
+                )
+            else:
+                logger.warning("DeepSeek Reasoner 适配器不可用，回退到 ChatOpenAI（可能不支持 tool calls）")
+
+        # DeepSeek Chat 使用标准 ChatOpenAI
         logger.info(f"检测到 DeepSeek API，使用 Chat Completions API: {model_name}, max_tokens={max_tokens}")
         return ChatOpenAI(
             model=model_name,
