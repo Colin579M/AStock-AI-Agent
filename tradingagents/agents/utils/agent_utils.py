@@ -625,12 +625,18 @@ class Toolkit:
         stock_code: Annotated[str, "股票代码，如 601899, 000001"],
     ) -> str:
         """
-        使用Tushare获取中国A股财务指标，包括ROE、ROA、毛利率、净利率、资产负债率等150+个指标。
-        这是最全面的财务分析数据源，涵盖盈利能力、偿债能力、成长能力等维度。
+        使用Tushare获取中国A股财务指标（5年历史+近4季详细），支持周期股估值分析。
+
+        返回内容：
+        1. **历史指标摘要**（5年/20季度）：EPS/ROE/毛利率的平均值、最高、最低、当前值及周期位置判断
+        2. **近4季详细数据**：盈利能力、每股指标、偿债能力、增长率
+
+        周期位置判断：低位(<25%)/偏低(25-50%)/偏高(50-75%)/高位(>75%)
+
         Args:
-            stock_code (str): 股票代码，如 601899（紫金矿业）
+            stock_code (str): 股票代码，如 601088（中国神华）、601899（紫金矿业）
         Returns:
-            str: 格式化的财务指标分析，按盈利能力、每股指标、偿债能力、增长率分类展示
+            str: 格式化的财务指标分析，含历史摘要（周期分析用）和近4季详细数据
         """
         from tradingagents.dataflows.tushare_utils import get_financial_indicators
         return get_financial_indicators(stock_code)

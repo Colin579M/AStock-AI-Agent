@@ -280,6 +280,7 @@ const CreateUserModal: React.FC<CreateUserModalProps> = ({ onClose, onSubmit }) 
   const [userId, setUserId] = useState('');
   const [name, setName] = useState('');
   const [role, setRole] = useState<'user' | 'admin'>('user');
+  const [accessCode, setAccessCode] = useState('');
   const [expiresAt, setExpiresAt] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -292,6 +293,7 @@ const CreateUserModal: React.FC<CreateUserModalProps> = ({ onClose, onSubmit }) 
       user_id: userId.trim(),
       name: name.trim(),
       role,
+      access_code: accessCode.trim() || undefined,
       expires_at: expiresAt || undefined,
     });
     setIsSubmitting(false);
@@ -347,6 +349,18 @@ const CreateUserModal: React.FC<CreateUserModalProps> = ({ onClose, onSubmit }) 
                 <option value="user">普通用户</option>
                 <option value="admin">管理员</option>
               </select>
+            </div>
+
+            <div className="admin-form-group">
+              <label className="admin-form-label">访问码</label>
+              <input
+                type="text"
+                className="admin-input"
+                value={accessCode}
+                onChange={(e) => setAccessCode(e.target.value)}
+                placeholder="留空则自动生成"
+              />
+              <p className="admin-form-hint">自定义访问码，留空则由系统自动生成随机码</p>
             </div>
 
             <div className="admin-form-group">

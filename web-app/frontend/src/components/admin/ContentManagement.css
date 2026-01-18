@@ -353,3 +353,173 @@
     max-height: 120px;
   }
 }
+
+/* ==================== Changelog 管理 ==================== */
+
+.changelog-management {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.add-changelog-btn {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.add-changelog-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Changelog 表单 */
+.changelog-form {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-group label {
+  font-size: 13px;
+  color: #7d8590;
+  font-weight: 500;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+  padding: 10px 12px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #e6edf3;
+  font-size: 14px;
+  font-family: inherit;
+  transition: border-color 0.2s ease;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  outline: none;
+  border-color: #238636;
+}
+
+.form-group input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.form-group textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+/* Changelog 列表项 */
+.changelog-item .content-title {
+  flex-wrap: wrap;
+}
+
+.type-badge {
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: white;
+}
+
+.version-badge {
+  padding: 4px 10px;
+  background: rgba(110, 118, 129, 0.15);
+  color: #8b949e;
+  border-radius: 6px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.changelog-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: #e6edf3;
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
+.changelog-item .content-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* 响应式 */
+@media (max-width: 768px) {
+  .form-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .changelog-form {
+    padding: 16px;
+  }
+
+  .form-actions {
+    flex-direction: column;
+  }
+
+  .form-actions button {
+    width: 100%;
+  }
+}
+
+@media (min-width: 1024px) {
+  .changelog-form {
+    padding: 24px;
+  }
+
+  .form-row {
+    gap: 20px;
+  }
+}
+
+@media (min-width: 1920px) {
+  .changelog-form {
+    padding: 28px;
+  }
+
+  .type-badge {
+    font-size: 13px;
+    padding: 4px 12px;
+  }
+
+  .version-badge {
+    font-size: 14px;
+  }
+
+  .changelog-title {
+    font-size: 16px;
+  }
+}

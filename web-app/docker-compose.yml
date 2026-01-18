@@ -21,9 +21,9 @@ services:
       - ../tradingagents:/app/tradingagents:ro
       # 挂载配置文件（需要写入 admin_logs.json, api_stats.json）
       - ./backend/config:/app/config
-      # 挂载数据目录（使用 named volumes 保持持久化）
-      - results:/app/results
-      - chroma_db:/app/chroma_db
+      # 挂载数据目录（bind mount 到宿主机目录，确保持久化）
+      - ../results:/app/results
+      - ../chroma_db:/app/chroma_db
     environment:
       - JWT_SECRET=${JWT_SECRET:-your-secret-key-change-in-production}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
@@ -32,7 +32,3 @@ services:
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
       - PYTHONPATH=/app:/app/tradingagents
     restart: unless-stopped
-
-volumes:
-  results:
-  chroma_db:

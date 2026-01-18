@@ -1,6 +1,76 @@
 {
   "updates": [
     {
+      "version": "v0.2.3",
+      "date": "2026-01-19",
+      "type": "improve",
+      "title": "Changelog智能合并与编辑增强",
+      "description": "部署脚本新增changelog智能合并功能（服务器优先策略），本地新增和服务器后台编辑的条目都会保留；后台支持编辑已有条目的版本号"
+    },
+    {
+      "version": "v0.2.2",
+      "date": "2026-01-18",
+      "type": "feature",
+      "title": "后台Changelog编辑功能",
+      "description": "管理后台内容管理页面新增更新日志标签页，支持在线添加、编辑、删除changelog条目，无需手动修改JSON文件"
+    },
+    {
+      "version": "v0.2.1",
+      "date": "2026-01-18",
+      "type": "fix",
+      "title": "修复报告列表500错误",
+      "description": "analysis_summary.json中completed_at字段为null时导致Pydantic验证失败，现已正确处理空值"
+    },
+    {
+      "version": "beta v0.2",
+      "date": "2026-01-18",
+      "type": "breaking",
+      "title": "孟哥不眠之夜",
+      "description": "熬夜一晚，修复PE区间硬约束（历史PE最高11.5倍不再敢写18倍）、仓位建议一致性检查、5级风险评分、周期股PE陷阱警示、盈亏比标准话术、EPS/BPS标注规范。测试6只股票12份报告，从「实习生乱写」升级到「初级分析师能用」。"
+    },
+    {
+      "version": "v0.1.12",
+      "date": "2026-01-18",
+      "type": "fix",
+      "title": "修复部署脚本Docker缓存问题",
+      "description": "push.sh添加--no-cache参数强制重建后端镜像，确保路径修复代码生效，彻底解决数据持久化问题"
+    },
+    {
+      "version": "v0.1.11",
+      "date": "2026-01-18",
+      "type": "improve",
+      "title": "报告质量全面升级",
+      "description": "PE/PB估值区间硬约束（≤历史最大×0.9）、周期股PE陷阱警示、5级风险评分体系、行业特有指标、可比公司量化对比、EPS/BPS标注规范、盈亏比标准表述"
+    },
+    {
+      "version": "v0.1.10",
+      "date": "2026-01-18",
+      "type": "fix",
+      "title": "Docker数据持久化彻底修复",
+      "description": "修复Docker容器内路径计算错误导致数据写入临时目录而非挂载点的问题，分析报告和用户记录现可正确跨部署保留"
+    },
+    {
+      "version": "v0.1.9",
+      "date": "2026-01-18",
+      "type": "fix",
+      "title": "当前股价数据修复",
+      "description": "基本面分析现使用Tushare实时收盘价，不再从市值推算；修复部署脚本results目录持久化问题"
+    },
+    {
+      "version": "v0.1.8",
+      "date": "2026-01-18",
+      "type": "fix",
+      "title": "估值区间数据依据完善",
+      "description": "PE/PB估值区间现提供3年历史分位数据依据（25%/中位数/75%分位），修复Docker数据持久化问题"
+    },
+    {
+      "version": "v0.1.7",
+      "date": "2026-01-18",
+      "type": "improve",
+      "title": "牛市估值校准与风控增强",
+      "description": "财务指标扩展至5年周期分析、新增牛市估值校准模块、市场过热预警、右侧交易减仓信号、增速验证检查、Chatbot超限智能降级"
+    },
+    {
       "version": "v0.1.6",
       "date": "2026-01-18",
       "type": "improve",
@@ -34,6 +104,20 @@
       "type": "fix",
       "title": "修复分析结果一致性问题",
       "description": "修复同一股票多次分析目标价差异过大的问题，强制使用行业适配估值方法，温度参数固定为0.1"
+    },
+    {
+      "version": "v0.1.14",
+      "date": "2026-01-18",
+      "type": "feature",
+      "title": "后台Changelog编辑功能",
+      "description": "管理后台内容管理页面新增更新日志标签页，支持在线添加、编辑、删除changelog条目，无需手动修改JSON文件"
+    },
+    {
+      "version": "v0.1.13",
+      "date": "2026-01-18",
+      "type": "fix",
+      "title": "修复报告列表500错误",
+      "description": "analysis_summary.json中completed_at字段为null时导致Pydantic验证失败，现已正确处理空值"
     },
     {
       "version": "v0.1.1",

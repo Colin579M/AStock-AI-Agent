@@ -120,11 +120,14 @@ def get_financial_indicators(
     stock_code: Annotated[str, "股票代码，如 600036, 000001"]
 ) -> str:
     """
-    获取财务指标数据，包括ROE、ROA、毛利率、净利率、资产周转率等关键指标。
-    适合评估公司运营效率和盈利质量。
+    获取财务指标数据（5年历史+近4季详细），支持周期股估值分析。
+
+    返回内容：
+    1. 历史指标摘要（5年/20季度）：EPS/ROE/毛利率的平均值、最高、最低及周期位置
+    2. 近4季详细数据：盈利能力、每股指标、偿债能力、增长率
 
     示例：
-    - get_financial_indicators("600036") -> 返回招商银行财务指标
+    - get_financial_indicators("601088") -> 返回中国神华财务指标（含周期位置判断）
     """
     from tradingagents.dataflows.tushare_utils import get_financial_indicators as _get_financial_indicators
     return _get_financial_indicators(stock_code)
@@ -687,7 +690,7 @@ TOOL_DESCRIPTIONS = {
     "get_stock_fundamentals": "获取基本面综合数据（财报、指标、预告、分红）",
     # Phase 2 财务分析类
     "get_financial_statements": "获取财务报表（利润表、资产负债表、现金流量表）",
-    "get_financial_indicators": "获取财务指标（ROE、ROA、毛利率、净利率等）",
+    "get_financial_indicators": "获取财务指标（5年历史+近4季详细，含周期位置判断）",
     "get_forecast": "获取业绩预告（预增/预减/扭亏/首亏等）",
     "get_dividend": "获取分红送股历史",
     "get_pledge_stat": "获取股权质押统计",

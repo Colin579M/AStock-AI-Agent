@@ -169,7 +169,8 @@ class AnalysisService:
         ticker_for_path = task.ticker.split('.')[0] if '.' in task.ticker else task.ticker
 
         # 创建目录结构
-        project_dir = Path(__file__).parent.parent.parent.parent.parent
+        # Docker 容器内: /app/app/services/analysis_service.py → 3个parent → /app → /app/results
+        project_dir = Path(__file__).parent.parent.parent
         results_dir = project_dir / "results" / ticker_for_path / task.date
         report_dir = results_dir / "reports"
         results_dir.mkdir(parents=True, exist_ok=True)
@@ -495,8 +496,8 @@ class AnalysisService:
         # 剥离市场后缀（.SZ/.SH），与 CLI 行为一致
         ticker_for_path = task.ticker.split('.')[0] if '.' in task.ticker else task.ticker
 
-        # 获取 results 目录
-        project_dir = Path(__file__).parent.parent.parent.parent.parent
+        # 获取 results 目录（与 _init_results_dir 保持一致）
+        project_dir = Path(__file__).parent.parent.parent
         report_dir = project_dir / "results" / ticker_for_path / task.date / "reports"
 
         try:
@@ -613,8 +614,8 @@ class AnalysisService:
         # 剥离市场后缀（.SZ/.SH），与 CLI 行为一致
         ticker_for_path = task.ticker.split('.')[0] if '.' in task.ticker else task.ticker
 
-        # 获取 results 目录（默认为项目根目录下的 results）
-        project_dir = Path(__file__).parent.parent.parent.parent.parent  # web-app/backend -> project root
+        # 获取 results 目录（与 _init_results_dir 保持一致）
+        project_dir = Path(__file__).parent.parent.parent
         results_dir = project_dir / "results" / ticker_for_path / task.date
 
         try:
@@ -784,9 +785,9 @@ class AnalysisService:
         return False
 
     def _get_results_base_dir(self) -> Path:
-        """获取结果目录根路径"""
+        """获取结果目录根路径（与 _init_results_dir 保持一致）"""
         from pathlib import Path
-        return Path(__file__).parent.parent.parent.parent.parent / "results"
+        return Path(__file__).parent.parent.parent / "results"
 
     def get_intermediate_report(self, task_id: str, report_type: str) -> Optional[str]:
         """

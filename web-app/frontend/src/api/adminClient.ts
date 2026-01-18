@@ -70,6 +70,7 @@ export interface CreateUserRequest {
   name: string;
   role: 'user' | 'admin';
   expires_at?: string;
+  access_code?: string;  // 自定义访问码，留空则自动生成
 }
 
 export interface CreateUserResponse {
@@ -128,6 +129,18 @@ export interface AdminLog {
   target_user_id: string | null;
   details: Record<string, unknown>;
   ip_address: string;
+}
+
+export interface ChangelogEntry {
+  version: string;
+  date: string;
+  type: 'feature' | 'improve' | 'fix' | 'breaking';
+  title: string;
+  description: string;
+}
+
+export interface ChangelogData {
+  updates: ChangelogEntry[];
 }
 
 // ============== Admin API ==============
@@ -216,6 +229,27 @@ export const adminApi = {
 
   getErrorLogs: async (limit = 100): Promise<Array<{ message: string; level: string }>> => {
     const response = await adminApiClient.get(`/api/admin/logs/errors?limit=${limit}`);
+    return response.data;
+  },
+
+  // Changelog
+  getChangelog: async (): Promise<ChangelogData> => {
+    const response = await adminApiClient.get('/api/admin/changelog');
+    return response.data;
+  },
+
+  updateChangelog: async (data: ChangelogData): Promise<{ success: boolean; message: string }> => {
+    const response = await adminApiClient.put('/api/admin/changelog', data);
+    return response.data;
+  },
+
+  addChangelogEntry: async (entry: ChangelogEntry): Promise<{ success: boolean; message: string }> => {
+    const response = await adminApiClient.post('/api/admin/changelog/entry', entry);
+    return response.data;
+  },
+
+  deleteChangelogEntry: async (version: string): Promise<{ success: boolean; message: string }> => {
+    const response = await adminApiClient.delete(`/api/admin/changelog/entry/${encodeURIComponent(version)}`);
     return response.data;
   },
 };

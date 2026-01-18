@@ -3,17 +3,36 @@
  */
 import React, { useState, useEffect } from 'react';
 import { adminApi } from '../../api/adminClient';
-import type { ReportInfo, ConversationInfo } from '../../api/adminClient';
+import type { ReportInfo, ConversationInfo, ChangelogEntry } from '../../api/adminClient';
 import './ContentManagement.css';
 
-type TabType = 'reports' | 'conversations';
+type TabType = 'reports' | 'conversations' | 'changelog';
+
+const TYPE_LABELS: Record<ChangelogEntry['type'], { label: string; color: string }> = {
+  feature: { label: '新功能', color: '#10b981' },
+  improve: { label: '优化', color: '#3b82f6' },
+  fix: { label: '修复', color: '#f59e0b' },
+  breaking: { label: '重大变更', color: '#ef4444' },
+};
 
 export const ContentManagement: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('reports');
   const [reports, setReports] = useState<ReportInfo[]>([]);
   const [conversations, setConversations] = useState<ConversationInfo[]>([]);
+  const [changelog, setChangelog] = useState<ChangelogEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+
+  // Changelog 编辑状态
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<ChangelogEntry | null>(null);
+  const [formData, setFormData] = useState<ChangelogEntry>({
+    version: '',
+    date: new Date().toISOString().split('T')[0],
+    type: 'feature',
+    title: '',
+    description: '',
+  });
 
   // 加载数据
   const loadData = async () => {
@@ -22,9 +41,12 @@ export const ContentManagement: React.FC = () => {
       if (activeTab === 'reports') {
         const data = await adminApi.listReports();
         setReports(data);
-      } else {
+      } else if (activeTab === 'conversations') {
         const data = await adminApi.listConversations();
         setConversations(data);
+      } else if (activeTab === 'changelog') {
+        const data = await adminApi.getChangelog();
+        setChangelog(data.updates || []);
       }
       setError('');
     } catch (err) {
@@ -66,17 +88,159 @@ export const ContentManagement: React.FC = () => {
     }
   };
 
+  // Changelog 操作
+  const handleAddChangelog = async () => {
+    if (!formData.version || !formData.title) {
+      setError('请填写版本号和标题');
+      return;
+    }
+
+    try {
+      await adminApi.addChangelogEntry(formData);
+      setShowAddForm(false);
+      setFormData({
+        version: '',
+        date: new Date().toISOString().split('T')[0],
+        type: 'feature',
+        title: '',
+        description: '',
+      });
+      loadData();
+    } catch (err) {
+      setError('添加更新日志失败');
+    }
+  };
+
+  const handleDeleteChangelog = async (version: string) => {
+    if (!confirm(`确定要删除版本 ${version} 的更新日志吗？`)) {
+      return;
+    }
+
+    try {
+      await adminApi.deleteChangelogEntry(version);
+      loadData();
+    } catch (err) {
+      setError('删除更新日志失败');
+    }
+  };
+
+  const handleEditChangelog = (entry: ChangelogEntry) => {
+    setEditingEntry(entry);
+    setFormData({ ...entry });
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingEntry) return;
+
+    try {
+      // 更新整个 changelog（删除旧的，添加新的到相同位置）
+      const newChangelog = changelog.map(e =>
+        e.version === editingEntry.version ? formData : e
+      );
+      await adminApi.updateChangelog({ updates: newChangelog });
+      setEditingEntry(null);
+      setFormData({
+        version: '',
+        date: new Date().toISOString().split('T')[0],
+        type: 'feature',
+        title: '',
+        description: '',
+      });
+      loadData();
+    } catch (err) {
+      setError('保存更新日志失败');
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingEntry(null);
+    setShowAddForm(false);
+    setFormData({
+      version: '',
+      date: new Date().toISOString().split('T')[0],
+      type: 'feature',
+      title: '',
+      description: '',
+    });
+  };
+
   // 格式化日期
   const formatDate = (dateStr: string) => {
     if (!dateStr) return '-';
     return new Date(dateStr).toLocaleString('zh-CN');
   };
 
+  // 渲染 Changelog 表单
+  const renderChangelogForm = () => (
+    <div className="changelog-form">
+      <div className="form-row">
+        <div className="form-group">
+          <label>版本号</label>
+          <input
+            type="text"
+            value={formData.version}
+            onChange={(e) => setFormData({ ...formData, version: e.target.value })}
+            placeholder="如 v0.1.14"
+          />
+        </div>
+        <div className="form-group">
+          <label>日期</label>
+          <input
+            type="date"
+            value={formData.date}
+            onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+          />
+        </div>
+        <div className="form-group">
+          <label>类型</label>
+          <select
+            value={formData.type}
+            onChange={(e) => setFormData({ ...formData, type: e.target.value as ChangelogEntry['type'] })}
+          >
+            <option value="feature">新功能</option>
+            <option value="improve">优化</option>
+            <option value="fix">修复</option>
+            <option value="breaking">重大变更</option>
+          </select>
+        </div>
+      </div>
+      <div className="form-group">
+        <label>标题</label>
+        <input
+          type="text"
+          value={formData.title}
+          onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+          placeholder="简短描述本次更新"
+        />
+      </div>
+      <div className="form-group">
+        <label>详细说明</label>
+        <textarea
+          value={formData.description}
+          onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+          placeholder="详细描述更新内容..."
+          rows={3}
+        />
+      </div>
+      <div className="form-actions">
+        <button className="admin-btn admin-btn-secondary" onClick={handleCancelEdit}>
+          取消
+        </button>
+        <button
+          className="admin-btn admin-btn-primary"
+          onClick={editingEntry ? handleSaveEdit : handleAddChangelog}
+        >
+          {editingEntry ? '保存修改' : '添加'}
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="content-management">
       <div className="admin-page-header">
         <h1>内容管理</h1>
-        <p>管理分析报告和对话记录</p>
+        <p>管理分析报告、对话记录和更新日志</p>
       </div>
 
       {error && (
@@ -110,6 +274,17 @@ export const ContentManagement: React.FC = () => {
           </svg>
           对话记录
           <span className="tab-count">{conversations.length}</span>
+        </button>
+        <button
+          className={`tab-btn ${activeTab === 'changelog' ? 'active' : ''}`}
+          onClick={() => setActiveTab('changelog')}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M12 8v4l3 3" />
+            <circle cx="12" cy="12" r="10" />
+          </svg>
+          更新日志
+          <span className="tab-count">{changelog.length}</span>
         </button>
       </div>
 
@@ -162,7 +337,7 @@ export const ContentManagement: React.FC = () => {
               ))}
             </div>
           )
-        ) : (
+        ) : activeTab === 'conversations' ? (
           // 对话列表
           conversations.length === 0 ? (
             <div className="empty-state">
@@ -202,6 +377,82 @@ export const ContentManagement: React.FC = () => {
               ))}
             </div>
           )
+        ) : (
+          // Changelog 列表
+          <div className="changelog-management">
+            {/* 添加按钮 */}
+            {!showAddForm && !editingEntry && (
+              <button
+                className="admin-btn admin-btn-primary add-changelog-btn"
+                onClick={() => setShowAddForm(true)}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+                添加更新日志
+              </button>
+            )}
+
+            {/* 添加/编辑表单 */}
+            {(showAddForm || editingEntry) && renderChangelogForm()}
+
+            {/* Changelog 列表 */}
+            {changelog.length === 0 ? (
+              <div className="empty-state">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 8v4l3 3" />
+                  <circle cx="12" cy="12" r="10" />
+                </svg>
+                <p>暂无更新日志</p>
+              </div>
+            ) : (
+              <div className="content-list changelog-list">
+                {changelog.map((entry) => (
+                  <div key={entry.version} className="content-item changelog-item">
+                    <div className="content-info">
+                      <div className="content-title">
+                        <span
+                          className="type-badge"
+                          style={{ backgroundColor: TYPE_LABELS[entry.type].color }}
+                        >
+                          {TYPE_LABELS[entry.type].label}
+                        </span>
+                        <span className="version-badge">{entry.version}</span>
+                        <span className="content-date">{entry.date}</span>
+                      </div>
+                      <div className="changelog-title">{entry.title}</div>
+                      {entry.description && (
+                        <div className="content-summary">{entry.description}</div>
+                      )}
+                    </div>
+                    <div className="content-actions">
+                      <button
+                        className="admin-btn admin-btn-secondary admin-btn-icon"
+                        onClick={() => handleEditChangelog(entry)}
+                        title="编辑"
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                        </svg>
+                      </button>
+                      <button
+                        className="admin-btn admin-btn-danger admin-btn-icon"
+                        onClick={() => handleDeleteChangelog(entry.version)}
+                        title="删除"
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <polyline points="3 6 5 6 21 6" />
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>

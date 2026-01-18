@@ -6,6 +6,10 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import './LoginPage.css';
 
+const API_URL = import.meta.env.VITE_API_URL === ''
+  ? ''
+  : (import.meta.env.VITE_API_URL || 'http://localhost:8000');
+
 interface ChangelogItem {
   version: string;
   date: string;
@@ -35,7 +39,7 @@ export const LoginPage: React.FC = () => {
 
   // 加载更新日志（通过 API 获取，避免 CDN 阻止 .json 文件）
   useEffect(() => {
-    fetch('/api/changelog')
+    fetch(`${API_URL}/api/changelog`)
       .then(res => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -141,7 +145,7 @@ export const LoginPage: React.FC = () => {
           <div className="tool-header">
             <span className="tool-icon">📊</span>
             <h2>数据查询助手</h2>
-            <span className="beta-tag">Beta v0.1</span>
+            <span className="beta-tag">Beta v0.2</span>
           </div>
           <p className="tool-desc">
             便捷的数据查询工具，支持公开数据检索与展示。仅供个人学习交流使用。
@@ -182,7 +186,7 @@ export const LoginPage: React.FC = () => {
           <div className="tool-header">
             <span className="tool-icon">🔥</span>
             <h2>热点监控</h2>
-            <span className="beta-tag">Beta v0.1</span>
+            <span className="beta-tag">Beta v0.2</span>
           </div>
           <p className="tool-desc">
             多平台热点聚合，支持关键词筛选、AI智能分析。实时掌握热点动态。

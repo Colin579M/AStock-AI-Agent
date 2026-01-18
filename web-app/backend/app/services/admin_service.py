@@ -55,7 +55,8 @@ class AdminService:
     def __init__(self):
         """初始化管理员服务"""
         self.config_dir = Path(__file__).parent.parent.parent / "config"
-        self.results_dir = Path(__file__).parent.parent.parent.parent / "results"
+        # Docker 容器内: /app/app/services/admin_service.py → 3个parent → /app → /app/results
+        self.results_dir = Path(__file__).parent.parent.parent / "results"
         self.logs_file = self.config_dir / "admin_logs.json"
         self.stats_file = self.config_dir / "api_stats.json"
 
@@ -259,10 +260,11 @@ class AdminService:
                         try:
                             with open(summary_file, 'r', encoding='utf-8') as f:
                                 summary_data = json.load(f)
-                                ticker_name = summary_data.get("ticker_name", "")
-                                user_id = summary_data.get("user_id", "")
-                                created_at = summary_data.get("created_at", "")
-                                completed_at = summary_data.get("completed_at", "")
+                                # 使用 or "" 确保 None 值转为空字符串，避免 Pydantic 验证失败
+                                ticker_name = summary_data.get("ticker_name") or ""
+                                user_id = summary_data.get("user_id") or ""
+                                created_at = summary_data.get("created_at") or ""
+                                completed_at = summary_data.get("completed_at") or ""
                         except Exception:
                             pass
 

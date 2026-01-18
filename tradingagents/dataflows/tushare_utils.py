@@ -228,9 +228,26 @@ def get_financial_statements(stock_code: str) -> str:
         return f"获取财务报表失败: {str(e)}"
 
 
+def _calc_cycle_position(current: float, min_val: float, max_val: float) -> str:
+    """计算当前值在历史区间中的周期位置"""
+    if max_val == min_val or pd.isna(current):
+        return "—"
+    ratio = (current - min_val) / (max_val - min_val)
+    if ratio <= 0.25:
+        return "**低位**"
+    elif ratio <= 0.5:
+        return "偏低"
+    elif ratio <= 0.75:
+        return "偏高"
+    else:
+        return "**高位**"
+
+
 def get_financial_indicators(stock_code: str) -> str:
     """
     获取财务指标（ROE、ROA、毛利率、净利率等）
+
+    返回近4季度详细数据 + 5年历史摘要（用于周期股估值）
 
     Args:
         stock_code: 股票代码
@@ -249,39 +266,90 @@ def get_financial_indicators(stock_code: str) -> str:
         if df.empty:
             return f"未找到股票 {stock_code} 的财务指标"
 
-        df = df.head(4)  # 最近4个季度
+        # 获取20个季度（5年）用于历史分析
+        df_full = df.head(20)
+        # 近4季度用于详细表格
+        df_recent = df.head(4)
 
         result = []
         result.append("# 财务指标分析\n")
 
-        # 盈利能力
-        result.append("## 盈利能力指标\n")
+        # === 历史摘要（周期分析用）===
+        if len(df_full) >= 8:  # 至少2年数据才显示摘要
+            result.append("## 历史指标摘要（周期分析）\n")
+            result.append(f"*数据覆盖: {df_full['end_date'].iloc[-1]} ~ {df_full['end_date'].iloc[0]}，共{len(df_full)}个季度*\n")
+            result.append("| 指标 | 5年平均 | 5年最高 | 5年最低 | 当前 | 周期位置 |")
+            result.append("|------|--------|--------|--------|------|---------|")
+
+            # EPS
+            eps_values = df_full['eps'].dropna()
+            if len(eps_values) >= 4:
+                avg_eps = eps_values.mean()
+                max_eps = eps_values.max()
+                min_eps = eps_values.min()
+                current_eps = eps_values.iloc[0]
+                position = _calc_cycle_position(current_eps, min_eps, max_eps)
+                result.append(f"| EPS(元) | {avg_eps:.2f} | {max_eps:.2f} | {min_eps:.2f} | {current_eps:.2f} | {position} |")
+
+            # ROE
+            roe_values = df_full['roe'].dropna()
+            if len(roe_values) >= 4:
+                avg_roe = roe_values.mean()
+                max_roe = roe_values.max()
+                min_roe = roe_values.min()
+                current_roe = roe_values.iloc[0]
+                position = _calc_cycle_position(current_roe, min_roe, max_roe)
+                result.append(f"| ROE(%) | {avg_roe:.1f} | {max_roe:.1f} | {min_roe:.1f} | {current_roe:.1f} | {position} |")
+
+            # 毛利率
+            gm_values = df_full['grossprofit_margin'].dropna()
+            if len(gm_values) >= 4:
+                avg_gm = gm_values.mean()
+                max_gm = gm_values.max()
+                min_gm = gm_values.min()
+                current_gm = gm_values.iloc[0]
+                position = _calc_cycle_position(current_gm, min_gm, max_gm)
+                result.append(f"| 毛利率(%) | {avg_gm:.1f} | {max_gm:.1f} | {min_gm:.1f} | {current_gm:.1f} | {position} |")
+
+            # 净利润增速
+            np_yoy_values = df_full['netprofit_yoy'].dropna()
+            if len(np_yoy_values) >= 4:
+                avg_np = np_yoy_values.mean()
+                max_np = np_yoy_values.max()
+                min_np = np_yoy_values.min()
+                current_np = np_yoy_values.iloc[0]
+                position = _calc_cycle_position(current_np, min_np, max_np)
+                result.append(f"| 净利润增速(%) | {avg_np:.1f} | {max_np:.1f} | {min_np:.1f} | {current_np:.1f} | {position} |")
+
+            result.append("")
+
+        # === 近4季度详细数据 ===
+        result.append("## 盈利能力指标（近4季）\n")
         result.append("| 报告期 | ROE(%) | ROA(%) | 毛利率(%) | 净利率(%) |")
         result.append("|--------|--------|--------|----------|----------|")
-        for _, row in df.iterrows():
+        for _, row in df_recent.iterrows():
             roe = row['roe'] if pd.notna(row['roe']) else 0
             roa = row['roa'] if pd.notna(row['roa']) else 0
-            # 使用 grossprofit_margin（销售毛利率%），而非 gross_margin（毛利金额）
             gm = row['grossprofit_margin'] if pd.notna(row['grossprofit_margin']) else 0
             npm = row['netprofit_margin'] if pd.notna(row['netprofit_margin']) else 0
             result.append(f"| {row['end_date']} | {roe:.2f} | {roa:.2f} | {gm:.2f} | {npm:.2f} |")
         result.append("")
 
         # 每股指标
-        result.append("## 每股指标\n")
+        result.append("## 每股指标（近4季）\n")
         result.append("| 报告期 | EPS(元) | BPS(元) |")
         result.append("|--------|---------|---------|")
-        for _, row in df.iterrows():
+        for _, row in df_recent.iterrows():
             eps = row['eps'] if pd.notna(row['eps']) else 0
             bps = row['bps'] if pd.notna(row['bps']) else 0
             result.append(f"| {row['end_date']} | {eps:.3f} | {bps:.2f} |")
         result.append("")
 
         # 偿债能力
-        result.append("## 偿债能力指标\n")
+        result.append("## 偿债能力指标（近4季）\n")
         result.append("| 报告期 | 资产负债率(%) | 流动比率 | 速动比率 |")
         result.append("|--------|--------------|---------|---------|")
-        for _, row in df.iterrows():
+        for _, row in df_recent.iterrows():
             debt_ratio = row['debt_to_assets'] if pd.notna(row['debt_to_assets']) else 0
             current = row['current_ratio'] if pd.notna(row['current_ratio']) else 0
             quick = row['quick_ratio'] if pd.notna(row['quick_ratio']) else 0
@@ -289,10 +357,10 @@ def get_financial_indicators(stock_code: str) -> str:
         result.append("")
 
         # 增长率
-        result.append("## 增长率指标\n")
+        result.append("## 增长率指标（近4季）\n")
         result.append("| 报告期 | 净利润同比(%) | 营收同比(%) |")
         result.append("|--------|-------------|-----------|")
-        for _, row in df.iterrows():
+        for _, row in df_recent.iterrows():
             np_yoy = row['netprofit_yoy'] if pd.notna(row['netprofit_yoy']) else 0
             tr_yoy = row['tr_yoy'] if pd.notna(row['tr_yoy']) else 0
             result.append(f"| {row['end_date']} | {np_yoy:.2f} | {tr_yoy:.2f} |")
@@ -306,74 +374,149 @@ def get_financial_indicators(stock_code: str) -> str:
 
 def get_daily_basic(stock_code: str, trade_date: Optional[str] = None) -> str:
     """
-    获取每日估值指标（PE、PB、市值、换手率等）
+    获取每日估值指标（PE、PB、市值、换手率等）+ 历史估值统计
 
     Args:
         stock_code: 股票代码
-        trade_date: 交易日期 (YYYYMMDD格式)，默认获取最近30天
+        trade_date: 交易日期 (YYYYMMDD格式)，默认获取最近数据
 
     Returns:
-        估值指标的格式化字符串
+        估值指标的格式化字符串，包含近3年历史估值统计
     """
     try:
         pro = get_pro_api()
         ts_code = convert_stock_code(stock_code)
 
-        if trade_date:
-            df = pro.daily_basic(ts_code=ts_code, trade_date=trade_date,
-                                fields='ts_code,trade_date,pe,pb,ps,total_mv,circ_mv,turnover_rate,volume_ratio')
-        else:
-            # 获取最近30天数据
-            end_date = datetime.now().strftime('%Y%m%d')
-            start_date = (datetime.now() - timedelta(days=60)).strftime('%Y%m%d')
-            df = pro.daily_basic(ts_code=ts_code, start_date=start_date, end_date=end_date,
-                                fields='ts_code,trade_date,pe,pb,ps,total_mv,circ_mv,turnover_rate,volume_ratio')
-
-        if df.empty:
-            return f"未找到股票 {stock_code} 的估值数据"
-
-        df = df.head(10)  # 最近10天
-
-        result = []
-        result.append("# 估值指标分析\n")
-        result.append("## 每日估值数据（最近10个交易日）\n")
-        result.append("| 日期 | PE(TTM) | PB | PS | 总市值(亿) | 流通市值(亿) | 换手率(%) | 量比 |")
-        result.append("|------|---------|-----|-----|-----------|------------|----------|------|")
-
-        for _, row in df.iterrows():
-            pe = row['pe'] if pd.notna(row['pe']) else 0
-            pb = row['pb'] if pd.notna(row['pb']) else 0
-            ps = row['ps'] if pd.notna(row['ps']) else 0
-            total_mv = row['total_mv'] / 10000 if pd.notna(row['total_mv']) else 0  # 万元转亿元
-            circ_mv = row['circ_mv'] / 10000 if pd.notna(row['circ_mv']) else 0
-            turnover = row['turnover_rate'] if pd.notna(row['turnover_rate']) else 0
-            volume_ratio = row['volume_ratio'] if pd.notna(row['volume_ratio']) else 0
-            result.append(f"| {row['trade_date']} | {pe:.2f} | {pb:.2f} | {ps:.2f} | {total_mv:.2f} | {circ_mv:.2f} | {turnover:.2f} | {volume_ratio:.2f} |")
-
-        # 计算平均值（安全处理 None/NaN）
+        # 安全转换函数
         def safe_float(val, default=0.0):
             """安全转换为float，处理None和NaN"""
             if val is None or pd.isna(val):
                 return default
             return float(val)
 
-        result.append("")
-        avg_pe = safe_float(df['pe'].mean(), 0)
-        avg_pb = safe_float(df['pb'].mean(), 0)
-        latest = df.iloc[0]
-        latest_pe = safe_float(latest['pe'], 0)
-        latest_pb = safe_float(latest['pb'], 0)
+        # 获取近3年历史数据用于估值分位计算
+        end_date = datetime.now().strftime('%Y%m%d')
+        start_date_3y = (datetime.now() - timedelta(days=365*3)).strftime('%Y%m%d')
 
-        if latest_pe > 0 or latest_pb > 0:
-            result.append(f"**最新估值**: PE={latest_pe:.2f}, PB={latest_pb:.2f}")
-            result.append(f"**近期平均**: PE={avg_pe:.2f}, PB={avg_pb:.2f}")
-        else:
-            result.append("**最新估值**: 数据暂不可用（该股可能为亏损股或数据源缺失）")
-        result.append("")
+        df_history = pro.daily_basic(
+            ts_code=ts_code,
+            start_date=start_date_3y,
+            end_date=end_date,
+            fields='ts_code,trade_date,pe,pb,ps,total_mv,circ_mv,turnover_rate,volume_ratio'
+        )
 
+        if df_history.empty:
+            return f"未找到股票 {stock_code} 的估值数据"
+
+        # 最近10天数据用于展示
+        df_recent = df_history.head(10)
+
+        result = []
+        result.append("# 估值指标分析\n")
+
+        # ===== 获取当前股价（daily_basic 不包含 close，需从 daily 获取）=====
+        try:
+            df_daily = pro.daily(ts_code=ts_code, start_date=end_date, end_date=end_date, fields='trade_date,close')
+            if df_daily.empty:
+                # 如果当天没数据，往前找最近的交易日
+                recent_start = (datetime.now() - timedelta(days=10)).strftime('%Y%m%d')
+                df_daily = pro.daily(ts_code=ts_code, start_date=recent_start, end_date=end_date, fields='trade_date,close')
+
+            if not df_daily.empty:
+                current_price = safe_float(df_daily.iloc[0]['close'])
+                trade_date = df_daily.iloc[0]['trade_date']
+                result.append(f"**当前股价**: {current_price:.2f}元（{trade_date}收盘价）\n")
+        except Exception as e:
+            logger.warning(f"获取收盘价失败: {e}")
+
+        # ===== 历史估值统计（重要！用于确定估值区间依据）=====
+        result.append("## 历史估值统计（近3年）\n")
+        result.append("**此数据用于确定估值区间依据，多情景估值时必须引用**\n")
+
+        # 过滤有效的 PE/PB 数据（排除负值和异常值）
+        pe_valid = df_history['pe'][(df_history['pe'] > 0) & (df_history['pe'] < 1000)]
+        pb_valid = df_history['pb'][(df_history['pb'] > 0) & (df_history['pb'] < 50)]
+
+        if len(pe_valid) > 10:
+            pe_min = safe_float(pe_valid.min())
+            pe_25 = safe_float(pe_valid.quantile(0.25))
+            pe_median = safe_float(pe_valid.median())
+            pe_75 = safe_float(pe_valid.quantile(0.75))
+            pe_max = safe_float(pe_valid.max())
+            latest_pe = safe_float(df_recent.iloc[0]['pe']) if pd.notna(df_recent.iloc[0]['pe']) else 0
+
+            # 计算当前PE所处分位
+            if latest_pe > 0:
+                pe_percentile = safe_float((pe_valid < latest_pe).sum() / len(pe_valid) * 100)
+            else:
+                pe_percentile = 0
+
+            result.append("| PE指标 | 最小值 | 25%分位 | 中位数 | 75%分位 | 最大值 | 当前值 | **当前分位** |")
+            result.append("|--------|--------|---------|--------|---------|--------|--------|-------------|")
+            result.append(f"| PE(TTM) | {pe_min:.1f} | {pe_25:.1f} | {pe_median:.1f} | {pe_75:.1f} | {pe_max:.1f} | {latest_pe:.1f} | **{pe_percentile:.0f}%** |")
+            result.append("")
+
+            # PE 建议估值区间
+            result.append("**PE估值区间依据**：")
+            result.append(f"- PE悲观区间下限：{pe_25:.1f}（25%分位）")
+            result.append(f"- PE中性参考：{pe_median:.1f}（中位数）")
+            result.append(f"- PE乐观区间上限：{pe_75:.1f}（75%分位）")
+            if pe_percentile > 80:
+                result.append(f"- ⚠️ 当前PE处于历史**{pe_percentile:.0f}%分位**，估值偏高")
+            elif pe_percentile < 20:
+                result.append(f"- ✅ 当前PE处于历史**{pe_percentile:.0f}%分位**，估值偏低")
+            result.append("")
+
+        if len(pb_valid) > 10:
+            pb_min = safe_float(pb_valid.min())
+            pb_25 = safe_float(pb_valid.quantile(0.25))
+            pb_median = safe_float(pb_valid.median())
+            pb_75 = safe_float(pb_valid.quantile(0.75))
+            pb_max = safe_float(pb_valid.max())
+            latest_pb = safe_float(df_recent.iloc[0]['pb']) if pd.notna(df_recent.iloc[0]['pb']) else 0
+
+            # 计算当前PB所处分位
+            if latest_pb > 0:
+                pb_percentile = safe_float((pb_valid < latest_pb).sum() / len(pb_valid) * 100)
+            else:
+                pb_percentile = 0
+
+            result.append("| PB指标 | 最小值 | 25%分位 | 中位数 | 75%分位 | 最大值 | 当前值 | **当前分位** |")
+            result.append("|--------|--------|---------|--------|---------|--------|--------|-------------|")
+            result.append(f"| PB | {pb_min:.2f} | {pb_25:.2f} | {pb_median:.2f} | {pb_75:.2f} | {pb_max:.2f} | {latest_pb:.2f} | **{pb_percentile:.0f}%** |")
+            result.append("")
+
+            # 给出建议估值区间
+            result.append("**PB估值区间依据**：")
+            result.append(f"- PB悲观区间下限：{pb_25:.2f}（25%分位）")
+            result.append(f"- PB中性参考：{pb_median:.2f}（中位数）")
+            result.append(f"- PB乐观区间上限：{pb_75:.2f}（75%分位）")
+            if pb_percentile > 80:
+                result.append(f"- ⚠️ 当前PB处于历史**{pb_percentile:.0f}%分位**，估值偏高")
+            elif pb_percentile < 20:
+                result.append(f"- ✅ 当前PB处于历史**{pb_percentile:.0f}%分位**，估值偏低")
+            result.append("")
+
+        # ===== 近期估值数据 =====
+        result.append("## 每日估值数据（最近10个交易日）\n")
+        result.append("| 日期 | PE(TTM) | PB | PS | 总市值(亿) | 流通市值(亿) | 换手率(%) | 量比 |")
+        result.append("|------|---------|-----|-----|-----------|------------|----------|------|")
+
+        for _, row in df_recent.iterrows():
+            pe = row['pe'] if pd.notna(row['pe']) else 0
+            pb = row['pb'] if pd.notna(row['pb']) else 0
+            ps = row['ps'] if pd.notna(row['ps']) else 0
+            total_mv = row['total_mv'] / 10000 if pd.notna(row['total_mv']) else 0
+            circ_mv = row['circ_mv'] / 10000 if pd.notna(row['circ_mv']) else 0
+            turnover = row['turnover_rate'] if pd.notna(row['turnover_rate']) else 0
+            volume_ratio = row['volume_ratio'] if pd.notna(row['volume_ratio']) else 0
+            result.append(f"| {row['trade_date']} | {pe:.2f} | {pb:.2f} | {ps:.2f} | {total_mv:.2f} | {circ_mv:.2f} | {turnover:.2f} | {volume_ratio:.2f} |")
+
+        result.append("")
         return "\n".join(result)
 
     except Exception as e:
+        logger.error(f"获取估值数据失败 [{stock_code}]: {e}")
         return f"获取估值数据失败: {str(e)}"
 
 

@@ -76,6 +76,76 @@ PYTHON_EOF
     fi
 }
 
+# 合并 Changelog（服务器优先）
+merge_changelog() {
+    echo -e "${YELLOW}📋 正在合并 Changelog...${NC}"
+
+    local LOCAL_CHANGELOG="$LOCAL_DIR/web-app/backend/app/changelog.json"
+    local REMOTE_CHANGELOG="/tmp/remote_changelog.json"
+
+    # 1. 从服务器 Docker 容器内下载当前 changelog（后台修改的在容器内）
+    if ! ssh "$SERVER" "cd $REMOTE_DIR/web-app && docker compose exec -T backend cat /app/app/changelog.json 2>/dev/null" > "$REMOTE_CHANGELOG" 2>/dev/null; then
+        echo -e "${YELLOW}服务器无 changelog 或容器未运行，跳过合并${NC}"
+        return 0
+    fi
+
+    # 检查文件是否有效
+    if ! python3 -c "import json; json.load(open('$REMOTE_CHANGELOG'))" 2>/dev/null; then
+        echo -e "${YELLOW}服务器 changelog 无效，跳过合并${NC}"
+        return 0
+    fi
+
+    # 2. 使用 Python 合并（服务器优先）
+    python3 << PYTHON_MERGE
+import json
+
+local_changelog = "$LOCAL_CHANGELOG"
+remote_changelog = "$REMOTE_CHANGELOG"
+
+# 加载两个文件
+with open(local_changelog, 'r', encoding='utf-8') as f:
+    local_data = json.load(f)
+with open(remote_changelog, 'r', encoding='utf-8') as f:
+    remote_data = json.load(f)
+
+# 服务器条目优先：先加服务器的，再加本地独有的
+seen_versions = set()
+merged = []
+
+# 先添加服务器的所有条目
+for entry in remote_data.get('updates', []):
+    version = entry.get('version')
+    if version and version not in seen_versions:
+        merged.append(entry)
+        seen_versions.add(version)
+
+server_count = len(merged)
+
+# 再添加本地独有的条目
+for entry in local_data.get('updates', []):
+    version = entry.get('version')
+    if version and version not in seen_versions:
+        merged.append(entry)
+        seen_versions.add(version)
+
+local_unique = len(merged) - server_count
+
+# 按日期降序排序
+merged.sort(key=lambda x: x.get('date', ''), reverse=True)
+
+# 写回本地文件
+with open(local_changelog, 'w', encoding='utf-8') as f:
+    json.dump({'updates': merged}, f, ensure_ascii=False, indent=2)
+
+print(f"合并完成: 服务器 {server_count} 条 + 本地独有 {local_unique} 条 = 总计 {len(merged)} 条")
+PYTHON_MERGE
+
+    # 3. 同步到前端
+    cp -f "$LOCAL_CHANGELOG" "$LOCAL_DIR/web-app/frontend/public/changelog.json"
+
+    echo -e "${GREEN}✅ Changelog 合并完成${NC}"
+}
+
 # 默认推送全部
 TARGET=${1:-all}
 
@@ -89,25 +159,34 @@ fi
 # 同步 changelog.json 到后端 app 目录（确保被 Docker 复制）
 cp -f "$CHANGELOG_FILE" "$LOCAL_DIR/web-app/backend/app/changelog.json"
 
+# 如果推送包含后端，先合并服务器的 changelog
+if [[ "$TARGET" == "backend" || "$TARGET" == "all" ]]; then
+    merge_changelog
+fi
+
 case $TARGET in
   frontend)
     echo "📦 打包前端（排除 node_modules）..."
     tar -czf /tmp/frontend.tar.gz --exclude='node_modules' --exclude='__pycache__' -C "$LOCAL_DIR" web-app/frontend
     echo "📤 上传中..."
     scp /tmp/frontend.tar.gz "$SERVER:$REMOTE_DIR/"
-    ssh "$SERVER" "cd $REMOTE_DIR && tar -xzf frontend.tar.gz && rm frontend.tar.gz && cd web-app && docker compose build --no-cache frontend && docker compose up -d frontend"
+    ssh "$SERVER" "cd $REMOTE_DIR && tar -xzf frontend.tar.gz && rm frontend.tar.gz && cd web-app && docker compose build frontend && docker compose up -d frontend"
     ;;
   backend)
     echo "📦 打包后端..."
     tar -czf /tmp/backend.tar.gz --exclude='__pycache__' --exclude='data_cache' -C "$LOCAL_DIR" web-app/backend tradingagents requirements.txt
     echo "📤 上传中..."
     scp /tmp/backend.tar.gz "$SERVER:$REMOTE_DIR/"
-    # 备份运行时配置 -> 解压 -> 恢复配置
+    # 备份运行时配置和数据 -> 解压 -> 恢复（changelog 已在本地合并，不需要备份恢复）
     ssh "$SERVER" "cd $REMOTE_DIR && \
-      mkdir -p /tmp/config_backup && \
+      mkdir -p /tmp/config_backup /tmp/data_backup && \
       cp -f web-app/backend/config/admin_logs.json web-app/backend/config/api_stats.json web-app/backend/config/access_codes.json /tmp/config_backup/ 2>/dev/null || true && \
+      cp -rf results /tmp/data_backup/ 2>/dev/null || true && \
+      cp -rf chroma_db /tmp/data_backup/ 2>/dev/null || true && \
       tar -xzf backend.tar.gz && rm backend.tar.gz && \
-      cp -f /tmp/config_backup/*.json web-app/backend/config/ 2>/dev/null || true && \
+      cp -f /tmp/config_backup/admin_logs.json /tmp/config_backup/api_stats.json /tmp/config_backup/access_codes.json web-app/backend/config/ 2>/dev/null || true && \
+      cp -rf /tmp/data_backup/results . 2>/dev/null || true && \
+      cp -rf /tmp/data_backup/chroma_db . 2>/dev/null || true && \
       cd web-app && docker compose build backend && docker compose up -d backend"
     ;;
   all)
@@ -115,13 +194,17 @@ case $TARGET in
     tar -czf /tmp/app.tar.gz --exclude='node_modules' --exclude='__pycache__' --exclude='data_cache' -C "$LOCAL_DIR" web-app tradingagents requirements.txt cli
     echo "📤 上传中..."
     scp /tmp/app.tar.gz "$SERVER:$REMOTE_DIR/"
-    # 备份运行时配置 -> 解压 -> 恢复配置
+    # 备份运行时配置和数据 -> 解压 -> 恢复（changelog 已在本地合并，不需要备份恢复）
     ssh "$SERVER" "cd $REMOTE_DIR && \
-      mkdir -p /tmp/config_backup && \
+      mkdir -p /tmp/config_backup /tmp/data_backup && \
       cp -f web-app/backend/config/admin_logs.json web-app/backend/config/api_stats.json web-app/backend/config/access_codes.json /tmp/config_backup/ 2>/dev/null || true && \
+      cp -rf results /tmp/data_backup/ 2>/dev/null || true && \
+      cp -rf chroma_db /tmp/data_backup/ 2>/dev/null || true && \
       tar -xzf app.tar.gz && rm app.tar.gz && \
-      cp -f /tmp/config_backup/*.json web-app/backend/config/ 2>/dev/null || true && \
-      cd web-app && docker compose build --no-cache frontend && docker compose build backend && docker compose up -d"
+      cp -f /tmp/config_backup/admin_logs.json /tmp/config_backup/api_stats.json /tmp/config_backup/access_codes.json web-app/backend/config/ 2>/dev/null || true && \
+      cp -rf /tmp/data_backup/results . 2>/dev/null || true && \
+      cp -rf /tmp/data_backup/chroma_db . 2>/dev/null || true && \
+      cd web-app && docker compose build frontend && docker compose build backend && docker compose up -d"
     ;;
   *)
     echo "用法: ./push.sh [frontend|backend|all]"

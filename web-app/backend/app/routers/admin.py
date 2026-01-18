@@ -384,3 +384,151 @@ async def get_error_logs(
 ):
     """获取错误日志"""
     return admin_service.get_error_logs(limit=limit)
+
+
+# ==================== Changelog 管理 ====================
+
+class ChangelogEntry(BaseModel):
+    """更新日志条目"""
+    version: str
+    date: str
+    type: Literal["feature", "improve", "fix", "breaking"]
+    title: str
+    description: str
+
+
+class ChangelogData(BaseModel):
+    """更新日志数据"""
+    updates: List[ChangelogEntry]
+
+
+@router.get("/changelog")
+async def get_changelog(admin: dict = Depends(require_admin)):
+    """获取更新日志"""
+    import json
+    from pathlib import Path
+
+    changelog_file = Path(__file__).parent.parent / "changelog.json"
+
+    if not changelog_file.exists():
+        return {"updates": []}
+
+    try:
+        with open(changelog_file, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取changelog失败: {e}")
+
+
+@router.put("/changelog")
+async def update_changelog(
+    data: ChangelogData,
+    req: Request,
+    admin: dict = Depends(require_admin)
+):
+    """更新整个changelog"""
+    import json
+    from pathlib import Path
+
+    changelog_file = Path(__file__).parent.parent / "changelog.json"
+
+    try:
+        with open(changelog_file, 'w', encoding='utf-8') as f:
+            json.dump({"updates": [entry.model_dump() for entry in data.updates]}, f, ensure_ascii=False, indent=2)
+
+        # 记录操作日志
+        admin_service.log_admin_action(
+            admin_id=admin["user_id"],
+            action="changelog_updated",
+            details={"entry_count": len(data.updates)},
+            ip_address=req.client.host if req.client else ""
+        )
+
+        return {"success": True, "message": "更新日志已保存"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"保存changelog失败: {e}")
+
+
+@router.post("/changelog/entry")
+async def add_changelog_entry(
+    entry: ChangelogEntry,
+    req: Request,
+    admin: dict = Depends(require_admin)
+):
+    """添加新的changelog条目（添加到列表开头）"""
+    import json
+    from pathlib import Path
+
+    changelog_file = Path(__file__).parent.parent / "changelog.json"
+
+    try:
+        # 读取现有数据
+        if changelog_file.exists():
+            with open(changelog_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        else:
+            data = {"updates": []}
+
+        # 添加到开头
+        data["updates"].insert(0, entry.model_dump())
+
+        # 保存
+        with open(changelog_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+        # 记录操作日志
+        admin_service.log_admin_action(
+            admin_id=admin["user_id"],
+            action="changelog_entry_added",
+            details={"version": entry.version, "title": entry.title},
+            ip_address=req.client.host if req.client else ""
+        )
+
+        return {"success": True, "message": f"已添加版本 {entry.version}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"添加changelog条目失败: {e}")
+
+
+@router.delete("/changelog/entry/{version}")
+async def delete_changelog_entry(
+    version: str,
+    req: Request,
+    admin: dict = Depends(require_admin)
+):
+    """删除指定版本的changelog条目"""
+    import json
+    from pathlib import Path
+
+    changelog_file = Path(__file__).parent.parent / "changelog.json"
+
+    try:
+        if not changelog_file.exists():
+            raise HTTPException(status_code=404, detail="changelog文件不存在")
+
+        with open(changelog_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        # 查找并删除
+        original_len = len(data["updates"])
+        data["updates"] = [u for u in data["updates"] if u["version"] != version]
+
+        if len(data["updates"]) == original_len:
+            raise HTTPException(status_code=404, detail=f"未找到版本 {version}")
+
+        # 保存
+        with open(changelog_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+        # 记录操作日志
+        admin_service.log_admin_action(
+            admin_id=admin["user_id"],
+            action="changelog_entry_deleted",
+            details={"version": version},
+            ip_address=req.client.host if req.client else ""
+        )
+
+        return {"success": True, "message": f"已删除版本 {version}"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除changelog条目失败: {e}")
