@@ -24,7 +24,16 @@ class Propagator:
             "company_of_interest": company_name,
             "trade_date": str(trade_date),
             "investment_debate_state": InvestDebateState(
-                {"history": "", "current_response": "", "count": 0}
+                {
+                    "history": "",
+                    "current_response": "",
+                    "count": 0,
+                    # === 锁定反驳机制：论点追踪初始化 ===
+                    "bull_claims": [],
+                    "bear_claims": [],
+                    "pending_rebuttals": [],
+                    "addressed_claims": [],
+                }
             ),
             "risk_debate_state": RiskDebateState(
                 {

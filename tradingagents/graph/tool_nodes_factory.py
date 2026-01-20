@@ -48,14 +48,17 @@ def _create_market_tools(toolkit) -> ToolNode:
         # 中国A股工具 - 通达信API
         toolkit.get_china_stock_data,
         toolkit.get_china_market_overview,
-        # 中国A股基本信息 - Tushare Pro（股票名称）
+        # 中国A股基本信息 - Tushare Pro（股票名称+行业）
         toolkit.get_tushare_stock_basic,
         # 中国A股估值工具 - Tushare Pro（PE/PB/市值/换手率）
         toolkit.get_tushare_daily_basic,
+        # === 傻瓜化板块工具：自动匹配行业指数 ===
+        toolkit.get_sector_benchmark_data,     # 板块对比（自动匹配行业指数）
         # 中国A股扩展工具 - Tushare Pro（板块/期货/解禁）
-        toolkit.get_tushare_index_daily,       # 板块指数日线（用于相对强弱分析）
-        toolkit.get_tushare_fut_daily,         # 期货日线（铜/金价格联动）
+        toolkit.get_tushare_index_daily,       # 板块指数日线（备用，用于手动指定指数）
+        toolkit.get_tushare_fut_daily,         # 期货日线（周期股必用）
         toolkit.get_tushare_share_float,       # 解禁日历（催化剂时点）
+        toolkit.get_tushare_adj_factor,        # 复权因子（除权除息分析）
         # 美股/其他市场工具 - Yahoo Finance (online)
         toolkit.get_YFin_data_online,
         toolkit.get_stockstats_indicators_report_online,
@@ -183,7 +186,7 @@ def get_tool_node_summary() -> Dict[str, Dict[str, Any]]:
     """
     return {
         "market": {
-            "count": 11,  # 添加了index_daily, fut_daily, share_float
+            "count": 13,  # 添加了sector_benchmark_data, adj_factor
             "purpose": "技术面分析",
             "data_sources": ["通达信", "Tushare Pro", "Yahoo Finance"],
         },
