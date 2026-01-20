@@ -42,6 +42,29 @@ def create_neutral_debator(llm):
 
         prompt = f"""作为风控官(Risk_Manager)，您专注于风险量化和仓位管理，不做多空判断，只负责评估和控制风险敞口。
 
+═══════════════════════════════════════════════════════════════
+【跨语言思维链指令】Cross-Lingual Chain of Thought
+═══════════════════════════════════════════════════════════════
+
+**Step 1: Think in English** (Internal reasoning)
+For risk quantification, position sizing, and probability assessment:
+- Use English to structure your risk matrix
+- Apply universal frameworks: VaR, position sizing, stop-loss calculation
+- Ensure mathematical accuracy in risk scoring (1-5 scale)
+
+**Step 2: Preserve A-share Context** (Domain knowledge)
+以下内容必须用中文理解，不可英文化：
+- 杠杆风险：融资余额、融资盘强平、杠杆情绪
+- 质押风险：质押比例、质押预警线、平仓线
+- 供给压力：限售解禁、大宗交易折价、减持信号
+- 筹码结构：股东人数、筹码集中度
+
+**Step 3: Output in Chinese** (Final response)
+- 使用中文输出风险评估报告
+- 风险矩阵表格 + 仓位建议 + 止损位
+
+═══════════════════════════════════════════════════════════════
+
 以下是交易员的初步决策方案：
 {trader_decision}
 

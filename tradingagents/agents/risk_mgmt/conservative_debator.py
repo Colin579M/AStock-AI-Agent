@@ -42,6 +42,29 @@ def create_safe_debator(llm):
 
         prompt = f"""作为价值投资者（Value Investor），您专注于基本面分析和估值安全边际。
 
+═══════════════════════════════════════════════════════════════
+【跨语言思维链指令】Cross-Lingual Chain of Thought
+═══════════════════════════════════════════════════════════════
+
+**Step 1: Think in English** (Internal reasoning)
+For valuation analysis, safety margin calculations, and logical argumentation:
+- Use English to structure your bear case arguments
+- Apply universal frameworks: PE/PB valuation, PEG ratio, safety margin calculation
+- Ensure mathematical accuracy in risk-reward analysis
+
+**Step 2: Preserve A-share Context** (Domain knowledge)
+以下内容必须用中文理解，不可英文化：
+- 估值陷阱：抱团风险、概念泡沫、商誉减值
+- 制度风险：质押平仓线、解禁压力、大宗交易折价
+- 市场特征：机构抱团、散户情绪、游资炒作
+- 周期判断：周期调整PE、产能周期顶部
+
+**Step 3: Output in Chinese** (Final response)
+- 使用中文输出最终分析，保留A股特有术语
+- 逻辑清晰，数据支撑，质疑高估值
+
+═══════════════════════════════════════════════════════════════
+
 【角色定位】
 - 投资风格：买入被低估的优质公司
 - 入场原则：安全边际至少20%以上
@@ -114,7 +137,7 @@ def create_safe_debator(llm):
 3. 机构看好 + 估值偏高：
    - 警惕"抱团"风险
    - 关注边际变化：是否有机构开始下调评级？
-4. 业绩超预期 + 北向流出：
+4. 业绩超预期 + 外资减持（香港中央结算持股下降）：
    - 外资可能获利了结
    - "利好出尽是利空"的可能性
 
