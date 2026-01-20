@@ -1,4 +1,4 @@
-from typing import Annotated, Sequence
+from typing import Annotated, Sequence, List
 from datetime import date, timedelta, datetime
 from typing_extensions import TypedDict, Optional
 from langchain_openai import ChatOpenAI
@@ -19,6 +19,12 @@ class InvestDebateState(TypedDict):
     current_response: Annotated[str, "Latest response"]  # Last response
     judge_decision: Annotated[str, "Final judge decision"]  # Last response
     count: Annotated[int, "Length of the current conversation"]  # Conversation length
+
+    # === 锁定反驳机制：论点追踪 ===
+    bull_claims: Annotated[List[str], "Bull方提出的核心论点列表"]
+    bear_claims: Annotated[List[str], "Bear方提出的核心论点列表"]
+    pending_rebuttals: Annotated[List[str], "待回应的论点（对方提出，我方需回应）"]
+    addressed_claims: Annotated[List[str], "已回应的论点"]
 
 
 # Risk management team state

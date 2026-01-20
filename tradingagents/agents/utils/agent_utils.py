@@ -21,7 +21,7 @@ def is_china_stock(ticker: str) -> bool:
 
     支持的代码格式:
     - 上海: 600xxx, 601xxx, 603xxx, 605xxx, 688xxx (科创板)
-    - 深圳: 000xxx, 002xxx, 003xxx, 300xxx, 301xxx (创业板)
+    - 深圳: 000xxx, 001xxx, 002xxx, 003xxx, 300xxx, 301xxx (创业板)
     - 北交所: 8xxxxx, 4xxxxx (暂不支持)
 
     Args:
@@ -35,10 +35,10 @@ def is_china_stock(ticker: str) -> bool:
     clean_ticker = ticker.split('.')[0].strip()
     # 判断是否为6位数字
     if clean_ticker.isdigit() and len(clean_ticker) == 6:
-        # 深圳：000xxx, 002xxx, 003xxx, 300xxx, 301xxx (创业板2020年后新发)
+        # 深圳：000xxx, 001xxx (2021年后新增), 002xxx, 003xxx, 300xxx, 301xxx
         # 上海：600xxx, 601xxx, 603xxx, 605xxx, 688xxx
         prefix = clean_ticker[:3]
-        valid_prefixes = ['000', '002', '003', '300', '301', '600', '601', '603', '605', '688']
+        valid_prefixes = ['000', '001', '002', '003', '300', '301', '600', '601', '603', '605', '688']
         if prefix in valid_prefixes:
             return True
     return False
@@ -727,17 +727,16 @@ class Toolkit:
     @tool
     def get_tushare_hsgt_flow() -> str:
         """
-        使用AKShare获取沪深港通资金流向数据。
+        获取北向资金持股排行数据。
 
-        ⚠️ 注意：2024年8月19日起沪深交所调整信息披露机制，北向资金整体流向数据已停止更新。
-        本工具现提供：
-        1. 历史资金流向数据（截至2024-08-16）
-        2. 当前北向资金十大持股情况
+        ⚠️ **重要**：北向资金整体流向（每日净流入/流出）已于2024年8月停止披露。
+        本工具仅返回仍可用的持股排行数据（但数据也可能过时）。
 
-        推荐使用 get_tushare_hsgt_individual 获取个股北向资金持股历史。
+        **推荐外资态度分析方案**：使用 get_tushare_top10_holders(stock_code)
+        查看前十大股东中"香港中央结算"的持股比例（季度数据，仍在更新）。
 
         Returns:
-            str: 北向资金流向数据及十大持股
+            str: 北向资金持股排行（⚠️ 数据可能已过时，请核对日期）
         """
         from tradingagents.dataflows.akshare_utils import get_hsgt_flow
         return get_hsgt_flow()
@@ -917,12 +916,17 @@ class Toolkit:
         stock_code: Annotated[str, "股票代码，如 600036, 000001"],
     ) -> str:
         """
-        使用AKShare获取个股北向资金持股历史，查看外资对某只股票的持股变化。
-        对于分析外资态度和持仓趋势非常有价值。
+        获取个股北向资金持股历史（⚠️ 数据已停更，仅返回历史数据）
+
+        ⚠️ **警告**：此接口数据已于2024年8月停更，返回的是历史数据。
+
+        **推荐替代方案**：使用 get_tushare_top10_holders(stock_code) 查看
+        前十大股东中"香港中央结算"的持股比例（季度数据，仍在更新）。
+
         Args:
             stock_code (str): 股票代码，如 600036（招商银行）
         Returns:
-            str: 格式化的个股北向资金持股历史数据
+            str: 格式化的个股北向资金持股历史数据（⚠️ 截止2024-08-16）
         """
         from tradingagents.dataflows.akshare_utils import get_hsgt_individual
         return get_hsgt_individual(stock_code)
@@ -1010,6 +1014,30 @@ class Toolkit:
         """
         from tradingagents.dataflows.tushare_utils import get_index_member
         return get_index_member(index_code)
+
+    @staticmethod
+    @tool
+    def get_sector_benchmark_data(
+        stock_code: Annotated[str, "股票代码，如 601899, 000001, 300750"],
+        days: Annotated[int, "获取天数，默认60天"] = 60,
+    ) -> str:
+        """
+        智能获取个股所属行业的板块指数数据（傻瓜化工具）。
+        只需传入股票代码，自动匹配行业指数并返回板块走势和相对强弱分析。
+
+        示例:
+        - 601899（紫金矿业）→ 自动匹配国证有色(399318.SZ)
+        - 600519（贵州茅台）→ 自动匹配中证酒(399987.SZ)
+        - 600036（招商银行）→ 自动匹配中证银行(399986.SZ)
+
+        Args:
+            stock_code (str): 股票代码
+            days (int): 获取天数，默认60天
+        Returns:
+            str: 包含行业名称、对标指数、指数走势、相对强弱分析的完整报告
+        """
+        from tradingagents.dataflows.tushare_utils import get_sector_benchmark_data
+        return get_sector_benchmark_data(stock_code, days)
 
     @staticmethod
     @tool
@@ -1174,3 +1202,113 @@ class Toolkit:
         """
         from tradingagents.dataflows.tushare_utils import get_concept
         return get_concept(stock_code)
+
+    @staticmethod
+    @tool
+    def get_industry_tam(
+        industry: Annotated[str, "行业名称，如 '医疗服务', '银行', '有色金属', '新能源'"],
+        stock_code: Annotated[str, "股票代码（可选），用于辅助确定行业归属"] = "",
+    ) -> str:
+        """
+        获取行业TAM（Total Addressable Market）和市场格局数据。
+
+        用于成长股终局思维估值，返回：
+        - 行业市场规模（TAM）估算
+        - 行业增速区间和渗透率
+        - 行业龙头和竞争格局
+        - 推荐估值方法
+        - 多头策略适用性（成长股/价值股/周期股）
+
+        采用三级降级策略：
+        1. Level 1: 精确TAM数据（如有行业研报）
+        2. Level 2: Top5企业营收估算（使用Tushare数据）
+        3. Level 3: 行业常数词典（兜底方案）
+
+        Args:
+            industry (str): 行业名称，支持：医疗服务、银行、保险、券商、有色金属、煤炭、钢铁、化工、
+                           白酒、食品饮料、家电、新能源、半导体、互联网、电力、燃气、房地产、建筑等
+            stock_code (str): 股票代码（可选）
+
+        Returns:
+            str: 格式化的行业TAM分析报告，包含市场规模、竞争格局、多头策略建议
+        """
+        from tradingagents.dataflows.tushare_utils import get_industry_tam_data
+        return get_industry_tam_data(industry, stock_code if stock_code else None)
+
+    # ========================================================================
+    # 概念关联度验证工具（2026-01 新增）
+    # ========================================================================
+
+    @staticmethod
+    @tool
+    def get_investor_qa(
+        stock_code: Annotated[str, "股票代码，如 002565, 601899"],
+        keyword: Annotated[str, "搜索关键词，如 '航天', '人工智能'"] = "",
+    ) -> str:
+        """
+        获取互动易/e互动投资者问答数据。
+        深交所股票(0/3开头)使用互动易，上交所股票(6开头)使用e互动。
+        用于追溯概念炒作起点和验证公司对特定业务的官方回应。
+
+        Args:
+            stock_code (str): 股票代码，如 002565（顺灏股份）
+            keyword (str): 搜索关键词，如 '航天', '卫星'
+
+        Returns:
+            str: 格式化的投资者问答列表
+        """
+        from tradingagents.dataflows.concept_validator_utils import get_investor_qa
+        return get_investor_qa(stock_code, keyword)
+
+    @staticmethod
+    @tool
+    def get_announcement_search(
+        stock_code: Annotated[str, "股票代码，如 002565, 601899"],
+        keyword: Annotated[str, "搜索关键词，如 '子公司', '战略合作'"] = "",
+        days: Annotated[int, "查询天数，默认365天"] = 365,
+    ) -> str:
+        """
+        搜索公司公告（巨潮资讯），查找业务拓展、战略合作等关键信息。
+        用于验证概念是否有公告依据，追溯业务变化时点。
+
+        Args:
+            stock_code (str): 股票代码
+            keyword (str): 搜索关键词（如 '航天', '子公司', '战略合作'）
+            days (int): 查询天数，默认365天
+
+        Returns:
+            str: 格式化的公告列表
+        """
+        from tradingagents.dataflows.concept_validator_utils import get_announcement_search
+        return get_announcement_search(stock_code, keyword, days)
+
+    @staticmethod
+    @tool
+    def get_concept_validation(
+        stock_code: Annotated[str, "股票代码，如 002565, 601899"],
+        target_concept: Annotated[str, "目标概念，如 '商业航天', '人工智能', '低空经济'"],
+    ) -> str:
+        """
+        概念关联度验证工具 - 综合分析股票与特定概念的关联程度。
+
+        数据来源：
+        1. 官方概念板块（Tushare）
+        2. 互动易/e互动投资者问答
+        3. 公司公告搜索
+
+        输出：
+        - 关联度评分（0-100）
+        - 关联等级：有实质业务(50-100) / 有公告提及(20-49) / 纯市场联想(0-19)
+        - 证据链详情
+
+        用于回答"这只股票为什么蹭XX概念"类问题。
+
+        Args:
+            stock_code (str): 股票代码，如 002565（顺灏股份）
+            target_concept (str): 目标概念名称，如 '商业航天'
+
+        Returns:
+            str: 概念关联度验证报告
+        """
+        from tradingagents.dataflows.concept_validator_utils import get_concept_validation_report
+        return get_concept_validation_report(stock_code, target_concept)
