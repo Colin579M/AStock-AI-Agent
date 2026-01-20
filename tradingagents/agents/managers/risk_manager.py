@@ -24,6 +24,23 @@ def create_risk_manager(llm, memory):
 
         prompt = f"""As the Risk Management Judge and Debate Facilitator, your goal is to evaluate the debate between three risk analysts—Risky, Neutral, and Safe/Conservative—and determine the best course of action for the trader. Your decision must result in a clear recommendation: Buy, Sell, or Hold. Choose Hold only if strongly justified by specific arguments, not as a fallback when all sides seem valid. Strive for clarity and decisiveness.
 
+═══════════════════════════════════════════════════════════════
+【Cross-Lingual Instruction】
+═══════════════════════════════════════════════════════════════
+
+Please think through this step-by-step in English to ensure logical accuracy:
+1. Summarize each analyst's position (Risky/Neutral/Safe)
+2. Identify the strongest evidence-based arguments
+3. Weigh risk-reward tradeoffs objectively
+4. Apply decision matrix: probability × magnitude of outcomes
+
+Your final output should be in Chinese, but your internal reasoning should follow English logic patterns to ensure:
+- Mathematical accuracy in risk quantification
+- Logical consistency in argument evaluation
+- Clear probability assessments
+
+═══════════════════════════════════════════════════════════════
+
 Guidelines for Decision-Making:
 1. **Summarize Key Arguments**: Extract the strongest points from each analyst, focusing on relevance to the context.
 2. **Provide Rationale**: Support your recommendation with direct quotes and counterarguments from the debate.
