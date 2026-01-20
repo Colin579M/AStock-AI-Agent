@@ -249,11 +249,13 @@ def get_hsgt_individual(
     stock_code: Annotated[str, "股票代码，如 600036, 000001"]
 ) -> str:
     """
-    获取个股北向资金持股历史，包括持股数量、持股市值、增减持变化。
-    可以追踪外资对某只股票的持仓变化趋势。
+    获取个股北向资金持股历史（⚠️ 数据已停更，截止2024-08-16）
+
+    **警告**：此接口数据已于2024年8月停更，返回的是历史数据。
+    **推荐**：使用 get_top10_holders 查看香港中央结算持股比例（季度数据，仍在更新）
 
     示例：
-    - get_hsgt_individual("600036") -> 返回招商银行北向资金持股历史
+    - get_hsgt_individual("600036") -> 返回招商银行北向资金持股历史（已停更）
     """
     from tradingagents.dataflows.akshare_utils import get_hsgt_individual as _get_hsgt_individual
     return _get_hsgt_individual(stock_code)
@@ -485,6 +487,74 @@ def get_stk_surv(
 
 
 # ============================================================================
+# Phase 2 扩展工具 - 概念关联度验证类（3个，2026-01 新增）
+# ============================================================================
+
+@tool
+def get_investor_qa(
+    stock_code: Annotated[str, "股票代码，如 002565, 601899"],
+    keyword: Annotated[str, "搜索关键词，如 '航天', '人工智能'"] = ""
+) -> str:
+    """
+    获取互动易/e互动投资者问答数据。
+    深交所股票(0/3开头)使用互动易，上交所股票(6开头)使用e互动。
+    用于追溯概念炒作起点和验证公司对特定业务的官方回应。
+
+    示例：
+    - get_investor_qa("002565", "航天") -> 搜索顺灏股份关于航天的问答
+    - get_investor_qa("601899") -> 获取紫金矿业全部问答
+    """
+    from tradingagents.dataflows.concept_validator_utils import get_investor_qa as _get_investor_qa
+    return _get_investor_qa(stock_code, keyword)
+
+
+@tool
+def get_announcement_search(
+    stock_code: Annotated[str, "股票代码，如 002565, 601899"],
+    keyword: Annotated[str, "搜索关键词，如 '子公司', '战略合作'"] = "",
+    days: Annotated[int, "查询天数，默认365"] = 365
+) -> str:
+    """
+    搜索公司公告（巨潮资讯），查找业务拓展、战略合作等关键信息。
+    用于验证概念是否有公告依据，追溯业务变化时点。
+
+    示例：
+    - get_announcement_search("002565", "子公司") -> 搜索顺灏股份子公司相关公告
+    - get_announcement_search("601899", "航天", 180) -> 搜索紫金矿业近180天航天相关公告
+    """
+    from tradingagents.dataflows.concept_validator_utils import get_announcement_search as _get_announcement_search
+    return _get_announcement_search(stock_code, keyword, days)
+
+
+@tool
+def get_concept_validation(
+    stock_code: Annotated[str, "股票代码，如 002565, 601899"],
+    target_concept: Annotated[str, "目标概念，如 '商业航天', '人工智能', '低空经济'"]
+) -> str:
+    """
+    概念关联度验证 - 分析股票与特定概念的实质关联程度。
+
+    用于回答"这只股票为什么蹭XX概念"类问题。
+
+    数据来源：
+    1. 官方概念板块（Tushare）
+    2. 互动易/e互动投资者问答（公司官方回应）
+    3. 公司公告（业务拓展、战略合作、子公司设立）
+
+    输出：
+    - 关联度评分（0-100）
+    - 关联等级：有实质业务(50-100) / 有公告提及(20-49) / 纯市场联想(0-19)
+    - 证据链详情
+
+    示例：
+    - get_concept_validation("002565", "商业航天") -> 验证顺灏股份与商业航天的关联
+    - get_concept_validation("002824", "航天") -> 验证和胜股份与航天概念的关联
+    """
+    from tradingagents.dataflows.concept_validator_utils import get_concept_validation_report
+    return get_concept_validation_report(stock_code, target_concept)
+
+
+# ============================================================================
 # 工具加载函数
 # ============================================================================
 
@@ -619,7 +689,7 @@ def load_unified_tools() -> List[BaseTool]:
 
 def load_all_tools() -> List[BaseTool]:
     """
-    加载所有可用工具（Phase 2: 23个 + 报告工具: 3个 = 26个）
+    加载所有可用工具（Phase 2: 26个 + 报告工具: 3个 = 29个）
 
     Returns:
         List[BaseTool]: 完整工具列表
@@ -660,6 +730,10 @@ def load_all_tools() -> List[BaseTool]:
         # Phase 2 机构/公告类（2个）
         get_report_rc,
         get_stk_surv,
+        # Phase 2 概念关联度验证类（3个，2026-01 新增）
+        get_investor_qa,
+        get_announcement_search,
+        get_concept_validation,
     ] + REPORT_TOOLS  # 报告查询工具（3个）
 
 
@@ -715,6 +789,10 @@ TOOL_DESCRIPTIONS = {
     # Phase 2 机构/公告类
     "get_report_rc": "获取券商研报评级",
     "get_stk_surv": "获取业绩快报和公告",
+    # Phase 2 概念关联度验证类（2026-01 新增）
+    "get_investor_qa": "获取互动易/e互动投资者问答（追溯概念炒作起点）",
+    "get_announcement_search": "搜索公司公告（业务拓展、战略合作等）",
+    "get_concept_validation": "概念关联度验证（回答为什么蹭XX概念）",
     # 报告查询工具
     "list_available_reports": "列出股票的所有历史分析报告",
     "get_analysis_report": "获取指定股票的历史分析报告内容",
