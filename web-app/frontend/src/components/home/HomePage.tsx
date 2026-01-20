@@ -8,14 +8,51 @@ import { analysisApi } from '../../api/client';
 import type { HistoryItem } from '../../api/client';
 import './HomePage.css';
 
+const API_URL = import.meta.env.VITE_API_URL === ''
+  ? ''
+  : (import.meta.env.VITE_API_URL || 'http://localhost:8000');
+
+interface ChangelogItem {
+  version: string;
+  date: string;
+  type: 'feature' | 'improve' | 'fix' | 'breaking';
+  title: string;
+  description: string;
+}
+
+const TYPE_LABELS: Record<string, string> = {
+  feature: '新功能',
+  improve: '优化',
+  fix: '修复',
+  breaking: '重大变更'
+};
+
 export const HomePage: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [showChangelog, setShowChangelog] = useState(false);
+  const [changelog, setChangelog] = useState<ChangelogItem[]>([]);
 
   useEffect(() => {
     // 加载历史记录
     analysisApi.getHistory(5).then(setHistory).catch(() => {});
+  }, []);
+
+  // 加载更新日志
+  useEffect(() => {
+    fetch(`${API_URL}/api/changelog`)
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then(data => {
+        setChangelog(data.updates || []);
+      })
+      .catch(err => {
+        console.error('Changelog fetch error:', err);
+        setChangelog([]);
+      });
   }, []);
 
   const getDecisionColor = (decision?: string) => {
@@ -34,9 +71,14 @@ export const HomePage: React.FC = () => {
             <h1>股票分析助手</h1>
             <p className="welcome-text">欢迎回来，{user?.name}</p>
           </div>
-          <button className="logout-btn" onClick={logout}>
-            退出
-          </button>
+          <div className="header-actions">
+            <button className="changelog-btn" onClick={(e) => { e.stopPropagation(); setShowChangelog(true); }}>
+              更新日志
+            </button>
+            <button className="logout-btn" onClick={logout}>
+              退出
+            </button>
+          </div>
         </div>
       </header>
 
@@ -118,6 +160,33 @@ export const HomePage: React.FC = () => {
           </div>
         )}
       </section>
+
+      {/* 更新日志 Modal */}
+      {showChangelog && (
+        <div className="changelog-modal" onClick={() => setShowChangelog(false)}>
+          <div className="changelog-content" onClick={e => e.stopPropagation()}>
+            <div className="changelog-header">
+              <h3>更新日志</h3>
+              <button className="close-btn" onClick={() => setShowChangelog(false)}>×</button>
+            </div>
+            <div className="changelog-list">
+              {changelog.map((item, index) => (
+                <div key={index} className="changelog-item">
+                  <div className="changelog-item-header">
+                    <span className={`changelog-tag ${item.type}`}>
+                      {TYPE_LABELS[item.type] || item.type}
+                    </span>
+                    <span className="changelog-version">{item.version}</span>
+                    <span className="changelog-date">{item.date}</span>
+                  </div>
+                  <div className="changelog-item-title">{item.title}</div>
+                  <div className="changelog-item-desc">{item.description}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

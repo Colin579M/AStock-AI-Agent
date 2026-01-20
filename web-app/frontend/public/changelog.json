@@ -1,6 +1,125 @@
 {
   "updates": [
     {
+      "version": "v0.5.7",
+      "date": "2026-01-20",
+      "type": "feature",
+      "title": "板块指数智能匹配增强",
+      "description": "【问题】中芯国际(688981)等半导体股票对标沪深300，东方财富(300059)对标创业板指，不够精准；【行业映射扩展】新增20+科技/金融细分行业映射（半导体→中证半导399976、元器件→中证元器件399978、证券→中证证券399975等）；【三级Fallback策略】①行业精确匹配②市场板块兜底（科创板→科创50、创业板→创业板指）③默认沪深300；【输出增强】报告新增「匹配方式」字段标注数据来源"
+    },
+    {
+      "version": "v0.5.6",
+      "date": "2026-01-20",
+      "type": "fix",
+      "title": "修复解禁日历数据过大导致Token超限",
+      "description": "【问题】分析001280等新股时Token超限（191K>131K限制），根因是get_share_float返回所有IPO参与者明细（001280有5983个股东，输出30万字符）；【修复】精简输出：汇总统计（总解禁数量/占比/股东数）+解禁日期分布+前20大股东明细；【效果】输出从300,866字符降至1,340字符，降幅99.5%，保留核心决策信息"
+    },
+    {
+      "version": "v0.5.5",
+      "date": "2026-01-20",
+      "type": "breaking",
+      "title": "移除所有非A股数据工具",
+      "description": "【问题】001280分析时情绪分析师调用get_stock_news_openai返回404；【根因】虽然is_china_stock()正确识别001为A股，但ToolNode仍包含OpenAI/YFin/Finnhub等非A股工具，LLM可能错误选择；【修复】tool_nodes_factory.py移除所有非A股工具（YFin/OpenAI/Finnhub/SimFin/Reddit），4个分析师文件简化elif分支；【影响】本项目正式成为A股专用系统，不再支持美股分析"
+    },
+    {
+      "version": "v0.5.4",
+      "date": "2026-01-20",
+      "type": "fix",
+      "title": "修复深圳主板001xxx代码识别",
+      "description": "【问题】分析001280等股票时错误调用Yahoo Finance返回Too many requests；【原因】is_china_stock()函数的valid_prefixes列表缺少'001'前缀，001xxx是深圳主板2021年后新增代码段（如001280万辰集团、001308康冠科技）；【修复】valid_prefixes添加'001'，001xxx现正确路由到中国数据源"
+    },
+    {
+      "version": "v0.5.3",
+      "date": "2026-01-19",
+      "type": "feature",
+      "title": "概念关联度验证（Concept Relevance Validator）",
+      "description": "【问题背景】分析报告未能回答「造纸股为什么蹭商业航天」这类用户最关心的问题；【数据来源】深交所互动易(stock_irm_cninfo)、上交所e互动(stock_sns_sseinfo)、巨潮公告(stock_zh_a_disclosure_report_cninfo)；【评分算法】官方概念板块+30、公告提及每条+15(上限30)、互动易提及每处+5(上限20)；【三级等级】有实质业务(50-100)/有公告提及(20-49)/纯市场联想(0-19)；【工具集成】news_analyst新增3个工具(get_investor_qa/get_announcement_search/get_concept_validation)，Chatbot同步注册；【验证效果】顺灏股份+商业航天测试：评分20/100，揭示公司以1.1亿参股北京轨道辰光科技（太空算力项目）"
+    },
+    {
+      "version": "v0.5.2",
+      "date": "2026-01-19",
+      "type": "feature",
+      "title": "锁定反驳机制（State-Based Locked Rebuttal）",
+      "description": "【问题诊断】解决多空辩论「平行线」问题——多头说增长、空头说估值，互不接招；【核心机制】论点提取器自动提取对方核心观点，注入「必答项」强制逐一回应；【状态扩展】InvestDebateState新增bull_claims/bear_claims/pending_rebuttals/addressed_claims四个追踪字段；【Prompt锁定】未回应的论点将被视为默认承认，形成真正对抗性辩论"
+    },
+    {
+      "version": "v0.5.1",
+      "date": "2026-01-19",
+      "type": "feature",
+      "title": "跨语言思维链（Cross-Lingual Chain of Thought）",
+      "description": "【核心理念】英文思考→逻辑准确性（数学/推理/估值框架），中文思考→语境保真度（A股特有概念/游资手法）；【三类模板】Template A（纯中文+术语保护）4个分析师、Template B（跨语言思维链）8个Agent、Template C（纯英文思维链）2个决策Agent；【A股术语保护】打板/龙头首阴/国家队护盘/抱团股/妖股/涨跌停板/北向资金/融资融券/质押平仓/解禁压力等50+术语禁止英文化；【覆盖范围】全部14个Agent文件完成改造"
+    },
+    {
+      "version": "v0.5.0",
+      "date": "2026-01-19",
+      "type": "feature",
+      "title": "多头逻辑增强（Steel-man the Bull）",
+      "description": "【三类股票差异化策略】成长股（TAM倒推/PS对标/期权估值）、价值股（股息复利/资产重估/均值回归）、周期股（周期悖论/产能出清/商品弹性）；【TAM数据工具】新增get_industry_tam工具，三级降级策略（精确TAM→Top5估算→行业常数词典），覆盖19个行业；【趋势交易员重构】多头从防守姿态转为进攻模式，遵循基本面分析师的行业/周期判断，风险由空方和风控官负责"
+    },
+    {
+      "version": "v0.4.0",
+      "date": "2026-01-19",
+      "type": "breaking",
+      "title": "北向资金数据停更修复",
+      "description": "【背景】港交所2024年8月起停止披露北向资金日度数据，修复报告中出现「根据最新数据（2024年8月）」的时间线穿帮问题；【数据层】删除akshare_utils停更的整体流向数据，添加数据时效性警告（7天/30天阈值），tushare_utils替换为hsgt_top10；【唯一可靠方案】外资态度分析改用「香港中央结算」持股比例（季度财报数据），两家公司持股相加=外资总持股；【工具清理】移除tool_nodes_factory中已停更的hsgt_individual工具，更新agent_utils工具docstring标注停更警告；【Prompt优化】情绪分析师明确禁止引用「今日北向资金净流入X亿」等停更数据，资金面评估模板添加数据来源标注；【术语统一】debator信号判断从「北向流入/流出」改为「外资增持/减持（香港中央结算）」"
+    },
+    {
+      "version": "v0.3.1",
+      "date": "2026-01-19",
+      "type": "improve",
+      "title": "多空辩论与分析师评级整合",
+      "description": "【一致性检查】研究主管强制对比分析师评级与辩论结论，若分歧必须说明原因和触发条件；【空方论据质量】空头分析师必须基于数据/事实/逻辑提出论点，禁止纯猜测，必须回应基本面盈亏比/安全边际；【结构化输出】研究主管输出评级汇总表格、分歧分析、升级/降级触发条件、投资计划；【新增模块】rating_extractor.py提取各分析师核心评级"
+    },
+    {
+      "version": "v0.3.0",
+      "date": "2026-01-19",
+      "type": "breaking",
+      "title": "估值体系全面升级",
+      "description": "【模型】升级DeepSeek V3.2推理模型，基本面分析使用深度思考模式（32-64K输出）；【估值】新增股息率估值法（模板E），适用高股息行业，三情景加权目标价；【验证】PE/PB区间硬约束、EPS/PE数学校验、股息率交叉验证、估值差异>30%强制深入分析；【数据】TTM分红累加多次分红、特殊分红自动识别剔除、历史股息率分位计算；【盈亏比】标准公式+特殊情况处理（悲观>当前价标注极佳），禁止负数输出"
+    },
+    {
+      "version": "v0.2.9",
+      "date": "2026-01-19",
+      "type": "improve",
+      "title": "升级至DeepSeek V3.2推理模型",
+      "description": "深度分析模型从deepseek-chat升级为deepseek-reasoner（DeepSeek V3.2思考模式），提供更强的推理能力和更大的输出容量（32-64K tokens）；基本面分析师改用深度思考模型以提升估值分析质量；快速响应模型保持deepseek-chat（V3.2非思考模式）"
+    },
+    {
+      "version": "v0.2.8",
+      "date": "2026-01-19",
+      "type": "fix",
+      "title": "修复多次分红股票TTM计算",
+      "description": "TTM分红改为累加过去12个月所有分红（修复中国神华等多次分红股票股息率被严重低估的问题）；历史股息率分位使用真实历史股价计算（新增API调用获取年末收盘价）；股息率估值展示检查清单强制要求输出三情景表格；估值差异>30%强制使用详细分析模板"
+    },
+    {
+      "version": "v0.2.7",
+      "date": "2026-01-19",
+      "type": "improve",
+      "title": "数据口径规范化",
+      "description": "股息率基数智能选择（默认TTM，波动>50%用3年均值）；特殊分红自动识别与剔除（超均值200%/高送转）；波动系数计算排除异常值；PE验证阈值收紧至5%并建议使用自行计算值；新增数据口径与计算规则Prompt强制块"
+    },
+    {
+      "version": "v0.2.6",
+      "date": "2026-01-19",
+      "type": "feature",
+      "title": "股息率交叉验证",
+      "description": "新增模板E（股息率估值法）适用于公用事业/银行/高速公路等高股息行业；get_dividend()增强输出当前股息率、历史分位、目标价参考；valuation_decision JSON新增dividend_yield_validation字段；高股息股票自动执行股息率vs主要估值交叉验证（差异>30%警告）"
+    },
+    {
+      "version": "v0.2.5",
+      "date": "2026-01-19",
+      "type": "fix",
+      "title": "修复后台Changelog编辑同步bug",
+      "description": "修复重复版本号编辑同步问题（改用索引标识）；部署合并策略改为本地优先（代码库是权威来源，服务器独有条目仍会保留）"
+    },
+    {
+      "version": "v0.2.4",
+      "date": "2026-01-19",
+      "type": "improve",
+      "title": "估值数据一致性验证",
+      "description": "新增PE区间下限硬约束（≥历史最小值）、EPS/PE数学一致性校验（误差≤10%）、强制PB交叉验证（差异>30%警告）；周期股模板改用历史PE分位而非硬编码区间；报告生成后自动验证并在问题时插入警告"
+    },
+    {
       "version": "v0.2.3",
       "date": "2026-01-19",
       "type": "improve",

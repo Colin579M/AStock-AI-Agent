@@ -26,6 +26,7 @@ export const ContentManagement: React.FC = () => {
   // Changelog 编辑状态
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingEntry, setEditingEntry] = useState<ChangelogEntry | null>(null);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);  // 用索引追踪，避免version重复问题
   const [formData, setFormData] = useState<ChangelogEntry>({
     version: '',
     date: new Date().toISOString().split('T')[0],
@@ -111,34 +112,38 @@ export const ContentManagement: React.FC = () => {
     }
   };
 
-  const handleDeleteChangelog = async (version: string) => {
+  const handleDeleteChangelog = async (index: number, version: string) => {
     if (!confirm(`确定要删除版本 ${version} 的更新日志吗？`)) {
       return;
     }
 
     try {
-      await adminApi.deleteChangelogEntry(version);
+      // 用索引删除，避免version重复导致删错条目
+      const newChangelog = changelog.filter((_, i) => i !== index);
+      await adminApi.updateChangelog({ updates: newChangelog });
       loadData();
     } catch (err) {
       setError('删除更新日志失败');
     }
   };
 
-  const handleEditChangelog = (entry: ChangelogEntry) => {
+  const handleEditChangelog = (entry: ChangelogEntry, index: number) => {
     setEditingEntry(entry);
+    setEditingIndex(index);
     setFormData({ ...entry });
   };
 
   const handleSaveEdit = async () => {
-    if (!editingEntry) return;
+    if (!editingEntry || editingIndex === null) return;
 
     try {
-      // 更新整个 changelog（删除旧的，添加新的到相同位置）
-      const newChangelog = changelog.map(e =>
-        e.version === editingEntry.version ? formData : e
+      // 使用索引更新，避免version重复导致多条被修改
+      const newChangelog = changelog.map((e, i) =>
+        i === editingIndex ? formData : e
       );
       await adminApi.updateChangelog({ updates: newChangelog });
       setEditingEntry(null);
+      setEditingIndex(null);
       setFormData({
         version: '',
         date: new Date().toISOString().split('T')[0],
@@ -154,6 +159,7 @@ export const ContentManagement: React.FC = () => {
 
   const handleCancelEdit = () => {
     setEditingEntry(null);
+    setEditingIndex(null);
     setShowAddForm(false);
     setFormData({
       version: '',
@@ -408,8 +414,8 @@ export const ContentManagement: React.FC = () => {
               </div>
             ) : (
               <div className="content-list changelog-list">
-                {changelog.map((entry) => (
-                  <div key={entry.version} className="content-item changelog-item">
+                {changelog.map((entry, index) => (
+                  <div key={`${entry.version}-${index}`} className="content-item changelog-item">
                     <div className="content-info">
                       <div className="content-title">
                         <span
@@ -429,7 +435,7 @@ export const ContentManagement: React.FC = () => {
                     <div className="content-actions">
                       <button
                         className="admin-btn admin-btn-secondary admin-btn-icon"
-                        onClick={() => handleEditChangelog(entry)}
+                        onClick={() => handleEditChangelog(entry, index)}
                         title="编辑"
                       >
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -439,7 +445,7 @@ export const ContentManagement: React.FC = () => {
                       </button>
                       <button
                         className="admin-btn admin-btn-danger admin-btn-icon"
-                        onClick={() => handleDeleteChangelog(entry.version)}
+                        onClick={() => handleDeleteChangelog(index, entry.version)}
                         title="删除"
                       >
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

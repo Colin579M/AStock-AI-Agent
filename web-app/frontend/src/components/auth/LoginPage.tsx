@@ -1,29 +1,10 @@
 /**
  * 登录页面 - 开发者工具集首页
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import './LoginPage.css';
-
-const API_URL = import.meta.env.VITE_API_URL === ''
-  ? ''
-  : (import.meta.env.VITE_API_URL || 'http://localhost:8000');
-
-interface ChangelogItem {
-  version: string;
-  date: string;
-  type: 'feature' | 'improve' | 'fix' | 'breaking';
-  title: string;
-  description: string;
-}
-
-const TYPE_LABELS: Record<string, string> = {
-  feature: '新功能',
-  improve: '优化',
-  fix: '修复',
-  breaking: '重大变更'
-};
 
 export const LoginPage: React.FC = () => {
   const [expandedTool, setExpandedTool] = useState<string | null>(null);
@@ -31,28 +12,9 @@ export const LoginPage: React.FC = () => {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showWechat, setShowWechat] = useState(false);
-  const [showChangelog, setShowChangelog] = useState(false);
-  const [changelog, setChangelog] = useState<ChangelogItem[]>([]);
 
   const { login } = useAuth();
   const navigate = useNavigate();
-
-  // 加载更新日志（通过 API 获取，避免 CDN 阻止 .json 文件）
-  useEffect(() => {
-    fetch(`${API_URL}/api/changelog`)
-      .then(res => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then(data => {
-        console.log('Changelog data:', data);
-        setChangelog(data.updates || []);
-      })
-      .catch(err => {
-        console.error('Changelog fetch error:', err);
-        setChangelog([]);
-      });
-  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,42 +54,12 @@ export const LoginPage: React.FC = () => {
         </div>
       )}
 
-      {/* 更新日志弹窗 */}
-      {showChangelog && (
-        <div className="changelog-modal" onClick={() => setShowChangelog(false)}>
-          <div className="changelog-content" onClick={e => e.stopPropagation()}>
-            <div className="changelog-header">
-              <h3>📋 更新日志</h3>
-              <button className="close-btn" onClick={() => setShowChangelog(false)}>×</button>
-            </div>
-            <div className="changelog-list">
-              {changelog.map((item, index) => (
-                <div key={index} className="changelog-item">
-                  <div className="changelog-item-header">
-                    <span className={`changelog-tag ${item.type}`}>
-                      {TYPE_LABELS[item.type] || item.type}
-                    </span>
-                    <span className="changelog-version">{item.version}</span>
-                    <span className="changelog-date">{item.date}</span>
-                  </div>
-                  <div className="changelog-item-title">{item.title}</div>
-                  <div className="changelog-item-desc">{item.description}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* 顶部导航 */}
       <header className="portal-header">
         <div className="logo">Colin's Dev Lab</div>
         <div className="header-links">
-          <button className="header-link" onClick={() => setShowChangelog(true)}>
-            📋 更新日志
-          </button>
           <button className="header-link" onClick={() => setShowWechat(true)}>
-            💬 联系我
+            联系我
           </button>
         </div>
       </header>

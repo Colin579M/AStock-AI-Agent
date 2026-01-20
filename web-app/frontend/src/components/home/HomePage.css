@@ -821,3 +821,166 @@
     max-width: clamp(1000px, 45vw, 1500px);
   }
 }
+
+/* =====================================
+   Header Actions
+   ===================================== */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* 更新日志按钮 */
+.changelog-btn {
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.changelog-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+/* =====================================
+   更新日志 Modal
+   ===================================== */
+.changelog-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1001;
+  padding: 20px;
+}
+
+.changelog-content {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 12px;
+  width: clamp(320px, 90vw, 500px);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.changelog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #30363d;
+}
+
+.changelog-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #e6edf3;
+}
+
+.changelog-header .close-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #8b949e;
+  cursor: pointer;
+  font-size: 18px;
+  transition: all 0.2s;
+}
+
+.changelog-header .close-btn:hover {
+  background: #30363d;
+  color: #e6edf3;
+}
+
+.changelog-list {
+  padding: 16px 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.changelog-item {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+.changelog-item:last-child {
+  margin-bottom: 0;
+}
+
+.changelog-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.changelog-tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.changelog-tag.feature {
+  background: rgba(35,134,54,0.2);
+  color: #3fb950;
+}
+
+.changelog-tag.improve {
+  background: rgba(88,166,255,0.2);
+  color: #58a6ff;
+}
+
+.changelog-tag.fix {
+  background: rgba(240,136,62,0.2);
+  color: #f0883e;
+}
+
+.changelog-tag.breaking {
+  background: rgba(248,81,73,0.2);
+  color: #f85149;
+}
+
+.changelog-version {
+  color: #e6edf3;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.changelog-date {
+  color: #8b949e;
+  font-size: 12px;
+  margin-left: auto;
+}
+
+.changelog-item-title {
+  color: #e6edf3;
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.changelog-item-desc {
+  color: #8b949e;
+  font-size: 13px;
+  line-height: 1.5;
+}

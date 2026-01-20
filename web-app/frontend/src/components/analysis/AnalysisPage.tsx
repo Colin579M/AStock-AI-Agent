@@ -623,6 +623,7 @@ export const AnalysisPage: React.FC = () => {
           </div>
         </div>
       )}
+
     </div>
   );
 };
