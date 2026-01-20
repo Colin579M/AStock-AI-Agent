@@ -120,8 +120,8 @@ DEFAULT_CONFIG = {
     # Supported providers: "openai", "anthropic", "google", "dashscope", "ollama", "openrouter"
     # For DashScope: set llm_provider="dashscope", deep_think_llm="qwen-plus", quick_think_llm="qwen-turbo"
     "llm_provider": "openai",  # DeepSeek 使用 OpenAI 兼容接口
-    "deep_think_llm": "deepseek-chat",
-    "quick_think_llm": "deepseek-chat",
+    "deep_think_llm": "deepseek-reasoner",  # DeepSeek V3.2 思考模式（深度推理，输出32-64K）
+    "quick_think_llm": "deepseek-chat",      # DeepSeek V3.2 非思考模式（快速响应，输出4-8K）
     "backend_url": "https://api.deepseek.com/v1",
     # Debate and discussion settings
     "max_debate_rounds": 1,

@@ -95,7 +95,7 @@ merge_changelog() {
         return 0
     fi
 
-    # 2. 使用 Python 合并（服务器优先）
+    # 2. 使用 Python 合并（本地优先 + 保留服务器独有条目）
     python3 << PYTHON_MERGE
 import json
 
@@ -108,27 +108,27 @@ with open(local_changelog, 'r', encoding='utf-8') as f:
 with open(remote_changelog, 'r', encoding='utf-8') as f:
     remote_data = json.load(f)
 
-# 服务器条目优先：先加服务器的，再加本地独有的
+# 本地优先：先加本地的，再加服务器独有的（后台新增的）
 seen_versions = set()
 merged = []
 
-# 先添加服务器的所有条目
-for entry in remote_data.get('updates', []):
-    version = entry.get('version')
-    if version and version not in seen_versions:
-        merged.append(entry)
-        seen_versions.add(version)
-
-server_count = len(merged)
-
-# 再添加本地独有的条目
+# 先添加本地的所有条目（代码库是权威来源）
 for entry in local_data.get('updates', []):
     version = entry.get('version')
     if version and version not in seen_versions:
         merged.append(entry)
         seen_versions.add(version)
 
-local_unique = len(merged) - server_count
+local_count = len(merged)
+
+# 再添加服务器独有的条目（后台新增的，本地没有的版本）
+for entry in remote_data.get('updates', []):
+    version = entry.get('version')
+    if version and version not in seen_versions:
+        merged.append(entry)
+        seen_versions.add(version)
+
+server_unique = len(merged) - local_count
 
 # 按日期降序排序
 merged.sort(key=lambda x: x.get('date', ''), reverse=True)
@@ -137,7 +137,7 @@ merged.sort(key=lambda x: x.get('date', ''), reverse=True)
 with open(local_changelog, 'w', encoding='utf-8') as f:
     json.dump({'updates': merged}, f, ensure_ascii=False, indent=2)
 
-print(f"合并完成: 服务器 {server_count} 条 + 本地独有 {local_unique} 条 = 总计 {len(merged)} 条")
+print(f"合并完成: 本地 {local_count} 条 + 服务器独有 {server_unique} 条 = 总计 {len(merged)} 条")
 PYTHON_MERGE
 
     # 3. 同步到前端
