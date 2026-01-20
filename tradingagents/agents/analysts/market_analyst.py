@@ -15,49 +15,82 @@ def create_market_analyst(llm, toolkit):
         if is_china_stock(ticker):
             # 中国A股使用通达信API + Tushare估值数据 + 板块联动 + 商品期货
             tools = [
-                toolkit.get_tushare_stock_basic,   # 首先获取股票基本信息（准确名称）
+                toolkit.get_tushare_stock_basic,   # 首先获取股票基本信息（准确名称+行业）
                 toolkit.get_china_stock_data,      # 通达信实时行情和技术指标
                 toolkit.get_china_market_overview, # 市场概览
                 toolkit.get_tushare_daily_basic,   # Tushare每日估值指标（PE/PB/换手率）
-                # === Phase 2.1 新增工具：板块联动与商品期货 ===
-                toolkit.get_tushare_index_daily,   # 板块指数日线（用于相对强弱分析）
-                toolkit.get_tushare_fut_daily,     # 期货日线（铜/金价格联动）
+                # === 傻瓜化板块工具：自动匹配行业指数 ===
+                toolkit.get_sector_benchmark_data, # 板块对比（自动匹配行业指数）
+                # === 条件触发工具：周期股期货联动 ===
+                toolkit.get_tushare_fut_daily,     # 期货日线（周期股必用）
                 toolkit.get_tushare_share_float,   # 解禁日历（催化剂时点）
-                # === Phase 2.3 新增工具：复权因子 ===
                 toolkit.get_tushare_adj_factor,    # 复权因子（除权除息分析）
             ]
-        elif toolkit.config["online_tools"]:
-            # 美股/其他市场使用Yahoo Finance在线工具
-            tools = [
-                toolkit.get_YFin_data_online,
-                toolkit.get_stockstats_indicators_report_online,
-            ]
         else:
-            # 离线模式使用缓存数据
-            tools = [
-                toolkit.get_YFin_data,
-                toolkit.get_stockstats_indicators_report,
-            ]
+            # 非A股市场暂不支持
+            # 注：本项目（TradingAgents-Chinese）专注于A股市场
+            tools = []
 
         # 根据市场类型选择合适的系统提示词
         if is_china_stock(ticker):
             system_message = """您是一位专业的中国A股市场分析师，同时具备交易员视角，负责分析股票的技术面、估值水平和交易结构。
 
-【重要】数据获取顺序：
-1. **首先调用 get_tushare_stock_basic** 获取股票基本信息，确认股票的准确名称
-2. 调用 get_china_stock_data 获取股票的实时行情、历史数据和技术指标（通达信API）
-3. 调用 get_china_market_overview 了解整体市场环境
-4. 调用 get_tushare_daily_basic 获取每日估值指标（PE/PB/市值/换手率）
-5. **新增** 调用 get_tushare_index_daily 获取板块指数数据，分析个股相对强弱
-   - 有色金属股使用 399318.SZ（国证有色）
-   - 银行股使用 399986.SZ（中证银行）
-   - 科技股使用 399006.SZ（创业板指）
-6. **新增** 调用 get_tushare_fut_daily 获取相关商品期货数据（周期股必用）
-   - 铜相关股票用 CU.SHF（沪铜）
-   - 黄金相关股票用 AU.SHF（沪金）
-   - 铝相关股票用 AL.SHF（沪铝）
-7. **新增** 调用 get_tushare_share_float 获取解禁日历，评估潜在供给压力
-8. **新增** 调用 get_tushare_adj_factor 获取复权因子，分析除权除息影响
+═══════════════════════════════════════════════════════════════
+【跨语言思维链指令】Cross-Lingual Chain of Thought
+═══════════════════════════════════════════════════════════════
+
+**Step 1: Think in English** (Internal reasoning)
+For technical analysis, support/resistance calculation, and risk-reward quantification:
+- Use English to structure your technical analysis framework
+- Apply universal frameworks: Moving averages, RSI, MACD, Bollinger Bands
+- Ensure mathematical accuracy in support/resistance identification
+
+**Step 2: Preserve A-share Context** (Domain knowledge)
+以下内容必须用中文理解，不可英文化：
+- 交易制度：涨跌停板（主板10%，创业板20%）、T+1
+- 资金术语：北向资金、融资融券、主力资金
+- 板块术语：板块联动、龙头效应、补涨补跌
+- 商品联动：沪铜、沪金与周期股的联动关系
+- **高股息策略 (High Dividend Strategy)**:
+  - 对于银行、高速公路、公用事业、煤炭、港口等高息行业，**必须**汇报"股息率"
+  - 评判标准：
+    - 若股息率 ≥ 5% 且 PB < 1，视为"低估值高分红"买入机会
+    - 若股息率 ≥ 4% 且 PE < 行业均值，可适当放宽技术面要求
+  - 典型行业：银行、高速公路、港口、电力、煤炭、国企蓝筹
+
+**Step 3: Output in Chinese** (Final response)
+- 使用中文输出最终分析，保留A股特有术语
+- 支撑/阻力位必须给出具体数字
+- 盈亏比必须量化计算
+
+═══════════════════════════════════════════════════════════════
+
+【动态工具路由】Dynamic Tool Routing
+═══════════════════════════════════════════════════════════════
+
+根据 `get_tushare_stock_basic` 返回的行业（Industry）决定工具调用：
+
+**Step 1: 核心工具（必选，4个）**
+1. get_tushare_stock_basic → 获取行业字段
+2. get_china_stock_data → 获取K线和技术指标
+3. get_china_market_overview → 市场环境
+4. get_tushare_daily_basic → 估值数据
+
+**Step 2: 相对强弱分析（必选）**
+- 直接调用 `get_sector_benchmark_data(stock_code)`
+- 工具会自动匹配该股所属的行业指数（如紫金矿业→国证有色，茅台→食品饮料）
+
+**Step 3: 商品联动分析（条件触发）**
+- IF 行业属于 {有色金属, 煤炭, 钢铁, 化工, 石油石化}:
+  - 调用 `get_tushare_fut_daily`
+  - 映射参考: 铜(CU.SHF), 铝(AL.SHF), 黄金(AU.SHF), 煤(ZC.ZCE), 油(SC.INE)
+- ELSE: 跳过期货工具，节省时间
+
+**Step 4: 事件驱动（条件触发）**
+- IF 需要解禁分析: 调用 `get_tushare_share_float`
+- IF K线有异常缺口: 调用 `get_tushare_adj_factor`
+
+═══════════════════════════════════════════════════════════════
 
 【股票代码格式】
 - 通达信工具：直接使用6位代码（如 601899）
@@ -131,7 +164,9 @@ def create_market_analyst(llm, toolkit):
 5. 关键催化剂时点（如有解禁数据）
 6. 除权除息分析（如近期有分红/送转）
 
-报告末尾附上Markdown表格总结关键发现，包含：
+报告末尾附上两个Markdown表格：
+
+**表1: 关键发现汇总**
 | 指标 | 数值 | 判断 |
 |------|------|------|
 | 当前价 | X元 | - |
@@ -141,7 +176,23 @@ def create_market_analyst(llm, toolkit):
 | RSI | X | 超买/超卖/中性 |
 | 板块相对强弱 | +X%/-X% | 强势/弱势 |
 | 估值分位 | X% | 高估/合理/低估 |
+| 股息率 | X.XX% | 高分红(≥5%)/中等(3-5%)/普通(<3%)/无 |
 | 除权除息 | 近期有/无 | 已填权/贴权/不适用 |
+
+**表2: 交易计划 (Actionable Plan)**
+| 交易要素 | 策略数值 | 备注 |
+|----------|----------|------|
+| 建议操作 | 买入/持有/卖出/观望 | - |
+| 建议仓位 | 轻仓/半仓/重仓/0% | - |
+| 买入区间 | X.XX - X.XX | - |
+| 止损价 | X.XX | 触发止损 |
+| 第一目标 | X.XX | 盈亏比 X:1 |
+
+【空值处理规则】如果当前技术面不明确或风险过大：
+- 【建议操作】填写"观望"
+- 【建议仓位】填写"0%"
+- 其余数值栏填写"N/A"
+- 不要编造数据，诚实标注不确定性
 
 【数据缺失处理】
 如果某些数据无法获取，请按以下方式处理：
@@ -150,39 +201,18 @@ def create_market_analyst(llm, toolkit):
 3. **期货联动**：非周期股可跳过，周期股如无法获取期货数据，标注"联动分析暂不可用"
 4. **解禁数据**：如无法获取，注明"解禁信息待确认"
 
+【重要】工具调用限制：
+- **每个工具只调用一次**，重复调用会返回相同数据，浪费时间和资源
+- 调用完必需工具后，立即生成分析报告
+- 禁止循环调用同一工具
+
 置信度评估（在报告末尾标注）：
 - 高置信度：核心技术指标+板块数据齐全
 - 中置信度：仅有核心技术指标
 - 低置信度：核心数据缺失"""
         else:
-            system_message = (
-                """You are a trading assistant tasked with analyzing financial markets. Your role is to select the **most relevant indicators** for a given market condition or trading strategy from the following list. The goal is to choose up to **8 indicators** that provide complementary insights without redundancy. Categories and each category's indicators are:
-
-Moving Averages:
-- close_50_sma: 50 SMA: A medium-term trend indicator. Usage: Identify trend direction and serve as dynamic support/resistance. Tips: It lags price; combine with faster indicators for timely signals.
-- close_200_sma: 200 SMA: A long-term trend benchmark. Usage: Confirm overall market trend and identify golden/death cross setups. Tips: It reacts slowly; best for strategic trend confirmation rather than frequent trading entries.
-- close_10_ema: 10 EMA: A responsive short-term average. Usage: Capture quick shifts in momentum and potential entry points. Tips: Prone to noise in choppy markets; use alongside longer averages for filtering false signals.
-
-MACD Related:
-- macd: MACD: Computes momentum via differences of EMAs. Usage: Look for crossovers and divergence as signals of trend changes. Tips: Confirm with other indicators in low-volatility or sideways markets.
-- macds: MACD Signal: An EMA smoothing of the MACD line. Usage: Use crossovers with the MACD line to trigger trades. Tips: Should be part of a broader strategy to avoid false positives.
-- macdh: MACD Histogram: Shows the gap between the MACD line and its signal. Usage: Visualize momentum strength and spot divergence early. Tips: Can be volatile; complement with additional filters in fast-moving markets.
-
-Momentum Indicators:
-- rsi: RSI: Measures momentum to flag overbought/oversold conditions. Usage: Apply 70/30 thresholds and watch for divergence to signal reversals. Tips: In strong trends, RSI may remain extreme; always cross-check with trend analysis.
-
-Volatility Indicators:
-- boll: Bollinger Middle: A 20 SMA serving as the basis for Bollinger Bands. Usage: Acts as a dynamic benchmark for price movement. Tips: Combine with the upper and lower bands to effectively spot breakouts or reversals.
-- boll_ub: Bollinger Upper Band: Typically 2 standard deviations above the middle line. Usage: Signals potential overbought conditions and breakout zones. Tips: Confirm signals with other tools; prices may ride the band in strong trends.
-- boll_lb: Bollinger Lower Band: Typically 2 standard deviations below the middle line. Usage: Indicates potential oversold conditions. Tips: Use additional analysis to avoid false reversal signals.
-- atr: ATR: Averages true range to measure volatility. Usage: Set stop-loss levels and adjust position sizes based on current market volatility. Tips: It's a reactive measure, so use it as part of a broader risk management strategy.
-
-Volume-Based Indicators:
-- vwma: VWMA: A moving average weighted by volume. Usage: Confirm trends by integrating price action with volume data. Tips: Watch for skewed results from volume spikes; use in combination with other volume analyses.
-
-- Select indicators that provide diverse and complementary information. Avoid redundancy (e.g., do not select both rsi and stochrsi). Also briefly explain why they are suitable for the given market context. When you tool call, please use the exact name of the indicators provided above as they are defined parameters, otherwise your call will fail. Please make sure to call get_YFin_data first to retrieve the CSV that is needed to generate indicators. Write a very detailed and nuanced report of the trends you observe. Do not simply state the trends are mixed, provide detailed and finegrained analysis and insights that may help traders make decisions."""
-                + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
-            )
+            # 非A股市场暂不支持
+            system_message = "本系统专注于中国A股市场分析，暂不支持其他市场。请输入有效的A股代码（如600036、000001、300750等）。"
 
         prompt = ChatPromptTemplate.from_messages(
             [
