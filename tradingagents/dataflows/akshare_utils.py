@@ -395,37 +395,116 @@ def get_earnings_forecast(stock_code: str) -> str:
 
 def get_china_stock_news(stock_code: str, curr_date: str = None) -> str:
     """
-    获取中国A股个股新闻
+    获取中国A股个股新闻（含情感分析和风险预警）
 
     Args:
         stock_code: 股票代码
         curr_date: 当前日期（可选）
 
     Returns:
-        str: 格式化的新闻数据
+        str: 格式化的新闻数据，包含舆情统计和风险预警
     """
     try:
         result_parts = []
         result_parts.append(f"# {stock_code} 相关新闻\n")
 
+        # 分级关键词体系
+        positive_kw = ['预增', '增长', '突破', '新高', '买入评级', '中标', '签约', '扩产', '获批',
+                       '业绩大增', '超预期', '利好', '创新高', '回购', '增持']
+        negative_kw = ['预减', '亏损', '立案', '警示', '新低', '无法', '违规', '减持', '下调',
+                       '业绩下滑', '不及预期', '利空', '下跌', '质押']
+
+        # 风险关键词（高权重，需要高亮）
+        risk_kw = ['立案调查', '退市', 'ST', '*ST', '警示函', '强制执行', '资不抵债',
+                   '暂停上市', '终止上市', '欺诈发行', '财务造假', '重大违法']
+
+        positive_count = 0
+        negative_count = 0
+        neutral_count = 0
+        risk_found = []
+        news_list = []
+
         # 获取东方财富个股新闻
         try:
             df_news = ak.stock_news_em(symbol=stock_code)
             if df_news is not None and not df_news.empty:
-                result_parts.append("## 最新新闻动态\n")
                 # 取最近20条新闻
                 df_recent = df_news.head(20)
 
                 for idx, row in df_recent.iterrows():
-                    title = row.get('新闻标题', row.get('标题', ''))
-                    content = row.get('新闻内容', row.get('内容', ''))[:200] + '...' if len(str(row.get('新闻内容', row.get('内容', '')))) > 200 else row.get('新闻内容', row.get('内容', ''))
+                    title = str(row.get('新闻标题', row.get('标题', '')))
+                    content = str(row.get('新闻内容', row.get('内容', '')))
                     pub_time = row.get('发布时间', row.get('时间', ''))
 
-                    result_parts.append(f"### {title}")
-                    result_parts.append(f"**发布时间**: {pub_time}")
-                    result_parts.append(f"{content}\n")
+                    text = title + content
 
-                result_parts.append("\n")
+                    # 检测风险关键词
+                    for kw in risk_kw:
+                        if kw in text:
+                            risk_found.append(kw)
+
+                    # 普通情感判断
+                    is_positive = any(kw in text for kw in positive_kw)
+                    is_negative = any(kw in text for kw in negative_kw)
+
+                    if is_positive and not is_negative:
+                        sentiment = "正面"
+                        positive_count += 1
+                    elif is_negative and not is_positive:
+                        sentiment = "负面"
+                        negative_count += 1
+                    else:
+                        sentiment = "中性"
+                        neutral_count += 1
+
+                    news_list.append({
+                        'title': title[:60] + '...' if len(title) > 60 else title,
+                        'time': pub_time,
+                        'sentiment': sentiment,
+                        'content': content[:150] + '...' if len(content) > 150 else content
+                    })
+
+                # 输出舆情统计
+                result_parts.append("## 舆情统计\n")
+
+                # 风险预警（优先显示）
+                if risk_found:
+                    unique_risks = list(set(risk_found))
+                    result_parts.append(f"⚠️ **重大风险预警**: 监测到 {', '.join(unique_risks)}\n")
+
+                total = positive_count + negative_count + neutral_count
+                if total > 0:
+                    result_parts.append(f"- 新闻总数: {total}条")
+                    result_parts.append(f"- 正面新闻: {positive_count}条 ({positive_count/total*100:.1f}%)")
+                    result_parts.append(f"- 负面新闻: {negative_count}条 ({negative_count/total*100:.1f}%)")
+                    result_parts.append(f"- 中性新闻: {neutral_count}条 ({neutral_count/total*100:.1f}%)")
+
+                    # 舆情倾向判断
+                    if positive_count > negative_count * 2:
+                        result_parts.append(f"- **舆情倾向**: 积极\n")
+                    elif negative_count > positive_count * 2:
+                        result_parts.append(f"- **舆情倾向**: 消极\n")
+                    else:
+                        result_parts.append(f"- **舆情倾向**: 中性\n")
+
+                # 新闻列表
+                result_parts.append("## 最新新闻动态\n")
+                result_parts.append("| 时间 | 标题 | 情感 |")
+                result_parts.append("|------|------|------|")
+
+                for news in news_list[:10]:
+                    result_parts.append(f"| {news['time']} | {news['title']} | {news['sentiment']} |")
+
+                if len(news_list) > 10:
+                    result_parts.append(f"\n*（仅显示前10条，共{len(news_list)}条新闻）*\n")
+
+                # 详细内容（前5条）
+                result_parts.append("\n## 新闻详情（前5条）\n")
+                for news in news_list[:5]:
+                    result_parts.append(f"### {news['title']}")
+                    result_parts.append(f"**发布时间**: {news['time']} | **情感**: {news['sentiment']}")
+                    result_parts.append(f"{news['content']}\n")
+
             else:
                 result_parts.append("暂无该股票的新闻数据\n")
         except Exception as e:
@@ -663,52 +742,49 @@ def get_china_money_flow(stock_code: str) -> str:
 
 def get_hsgt_flow() -> str:
     """
-    获取沪深港通资金流向（北向资金整体流向）
+    获取北向资金持股排行数据
 
-    注意：2024年8月19日起，交易所调整信息披露机制，
-    整体北向资金流向数据已停止实时披露，但历史数据仍可查询。
+    注意：2024年8月19日起，北向资金整体流向数据已停止披露，
+    本函数仅返回仍可用的持股排行数据。
 
     Returns:
-        str: 格式化的北向资金流向数据
+        str: 格式化的北向资金持股排行数据
     """
     try:
         result_parts = []
-        result_parts.append("# 北向资金流向 (AKShare)\n")
+        result_parts.append("# 北向资金持股排行\n")
+        result_parts.append("⚠️ 注：北向资金整体流向（每日净流入/流出）已于2024年8月停止披露，以下为仍可用的持股排行数据。\n\n")
 
-        # 1. 获取北向资金历史流向
-        try:
-            df = ak.stock_hsgt_hist_em(symbol="北向资金")
-            if df is not None and not df.empty:
-                # 筛选有效数据（非NaN）
-                df_valid = df[df['当日成交净买额'].notna()]
-
-                if not df_valid.empty:
-                    result_parts.append("## 北向资金历史流向（最近有效数据）\n")
-                    # 取最近10条有效数据
-                    df_recent = df_valid.tail(10)
-                    cols = ['日期', '当日成交净买额', '买入成交额', '卖出成交额', '历史累计净买额']
-                    available_cols = [c for c in cols if c in df_recent.columns]
-                    result_parts.append(df_recent[available_cols].to_markdown(index=False))
-                    result_parts.append("\n")
-
-                    # 添加最新日期说明
-                    latest_date = df_valid['日期'].iloc[-1]
-                    result_parts.append(f"\n**注意**: 数据截止到 {latest_date}，之后因交易所政策调整已停止披露整体流向。\n")
-                else:
-                    result_parts.append("## 北向资金整体流向\n")
-                    result_parts.append("⚠️ 2024年8月19日起，交易所已停止披露北向资金整体流向数据。\n")
-                    result_parts.append("请查看下方的持股排行或个股持股数据。\n")
-        except Exception as e:
-            result_parts.append(f"北向资金历史流向获取失败: {str(e)}\n")
-
-        # 2. 获取北向资金持股排行（最新）
+        # 获取北向资金持股排行
         try:
             df_hold = ak.stock_hsgt_hold_stock_em(market="北向", indicator="今日排行")
             if df_hold is not None and not df_hold.empty:
-                result_parts.append("\n## 北向资金持股排行（今日）\n")
+                # 关键：提取实际数据日期，避免时间线穿帮
+                actual_date = "未知"
+                date_warning = ""
+                if '日期' in df_hold.columns:
+                    actual_date = str(df_hold['日期'].iloc[0])
+                    # 计算数据年龄
+                    try:
+                        from datetime import datetime
+                        data_date = datetime.strptime(actual_date, "%Y-%m-%d")
+                        age_days = (datetime.now() - data_date).days
+                        if age_days > 30:
+                            date_warning = f"⚠️ **时效性警告**：数据日期为 {actual_date}，距今 {age_days} 天，请核实数据是否适用于当前分析。\n\n"
+                        elif age_days > 7:
+                            date_warning = f"📅 数据日期：{actual_date}（{age_days}天前，请注意时效性）\n\n"
+                        elif age_days > 1:
+                            date_warning = f"📅 数据日期：{actual_date}（{age_days}天前）\n\n"
+                        else:
+                            date_warning = f"📅 数据日期：{actual_date}\n\n"
+                    except:
+                        date_warning = f"📅 数据日期：{actual_date}\n\n"
+
+                result_parts.append(f"## 持股市值前15（{actual_date}）\n")
+                result_parts.append(date_warning)
                 # 取前15名
                 df_top = df_hold.head(15)
-                cols = ['代码', '名称', '今日收盘价', '今日持股-市值', '今日增持估计-市值', '今日持股-占流通股比', '日期']
+                cols = ['代码', '名称', '今日收盘价', '今日持股-市值', '今日增持估计-市值', '今日持股-占流通股比']
                 available_cols = [c for c in cols if c in df_top.columns]
                 result_parts.append(df_top[available_cols].to_markdown(index=False))
                 result_parts.append("\n")
@@ -719,7 +795,7 @@ def get_hsgt_flow() -> str:
                 result_parts.append(f"\n**统计**: 北向资金总持股市值约 {total_value/10000:.2f} 亿元")
                 if total_change != 0:
                     direction = "增持" if total_change > 0 else "减持"
-                    result_parts.append(f"，今日估计{direction} {abs(total_change)/10000:.2f} 亿元")
+                    result_parts.append(f"，{actual_date}估计{direction} {abs(total_change)/10000:.2f} 亿元")
                 result_parts.append("\n")
         except Exception as e:
             result_parts.append(f"北向持股排行获取失败: {str(e)}\n")
@@ -793,43 +869,83 @@ def get_hsgt_individual(stock_code: str) -> str:
     """
     获取个股北向资金持股历史
 
+    ⚠️ 警告：此接口数据已于2024年8月停更，仅返回历史数据。
+    外资态度分析请优先使用 get_top10_holders() 查看香港中央结算持股比例。
+
     Args:
         stock_code: 股票代码，如 "600036"
 
     Returns:
-        str: 格式化的个股北向资金持股数据
+        str: 格式化的个股北向资金持股数据（历史数据，已停更）
     """
     try:
+        from datetime import datetime
         result_parts = []
-        result_parts.append(f"# {stock_code} 北向资金持股 (AKShare)\n")
+        result_parts.append(f"# {stock_code} 北向资金持股（⚠️ 数据已停更）\n")
+        result_parts.append("**注意**：此数据源已于2024年8月停更，以下为历史数据。\n")
+        result_parts.append("**推荐**：请使用 get_top10_holders 查看香港中央结算持股比例（季度数据）。\n\n")
 
         # 获取个股北向持股历史
         try:
             df = ak.stock_hsgt_individual_em(symbol=stock_code)
             if df is not None and not df.empty:
-                result_parts.append("## 北向资金持股历史（近30日）\n")
                 # 取最近30条
                 df_recent = df.tail(30)
-                cols = ['持股日期', '当日收盘价', '当日涨跌幅', '持股数量', '持股市值',
-                       '持股数量占A股百分比', '今日增持股数', '今日增持资金']
-                available_cols = [c for c in cols if c in df_recent.columns]
-                result_parts.append(df_recent[available_cols].to_markdown(index=False))
+
+                # 验证数据日期
+                if '持股日期' in df_recent.columns:
+                    latest_date_str = str(df_recent['持股日期'].iloc[-1])
+                    try:
+                        latest_date = datetime.strptime(latest_date_str, "%Y-%m-%d")
+                        age_days = (datetime.now() - latest_date).days
+                        if age_days > 30:
+                            result_parts.append(f"⚠️ **时效性警告**：数据截止于 {latest_date_str}，距今 {age_days} 天\n\n")
+                        elif age_days > 7:
+                            result_parts.append(f"📅 数据日期：{latest_date_str}（{age_days}天前）\n\n")
+                        else:
+                            result_parts.append(f"📅 数据日期：{latest_date_str}\n\n")
+                    except:
+                        result_parts.append(f"📅 数据日期：{latest_date_str}\n\n")
+
+                # 外资态度摘要（方案A核心输出）
+                if '持股数量' in df_recent.columns and '今日增持股数' in df_recent.columns:
+                    latest = df_recent.iloc[-1]
+                    prev = df_recent.iloc[-2] if len(df_recent) >= 2 else latest
+
+                    latest_shares = latest['持股数量']
+                    prev_shares = prev['持股数量']
+                    change_shares = latest_shares - prev_shares
+
+                    result_parts.append("## 外资态度摘要\n")
+                    if change_shares > 0:
+                        result_parts.append(f"📈 **外资加仓**：持股从 {prev_shares/10000:.0f}万股 增至 {latest_shares/10000:.0f}万股（+{change_shares/10000:.0f}万股）\n\n")
+                    elif change_shares < 0:
+                        result_parts.append(f"📉 **外资减仓**：持股从 {prev_shares/10000:.0f}万股 降至 {latest_shares/10000:.0f}万股（{change_shares/10000:.0f}万股）\n\n")
+                    else:
+                        result_parts.append(f"➡️ **外资持平**：持股维持在 {latest_shares/10000:.0f}万股\n\n")
+
+                    # 近5日趋势
+                    recent_5d = df_recent.tail(5)
+                    if '今日增持资金' in recent_5d.columns:
+                        recent_change = recent_5d['今日增持资金'].sum()
+                        if recent_change != 0:
+                            direction = "净增持" if recent_change > 0 else "净减持"
+                            result_parts.append(f"**近5日趋势**：{direction} {abs(recent_change)/100000000:.2f} 亿元\n\n")
+
+                # 持股明细表（精简显示最近10条）
+                result_parts.append("## 持股历史（近10日）\n")
+                df_display = df_recent.tail(10)
+                cols = ['持股日期', '持股数量', '持股市值', '持股数量占A股百分比', '今日增持股数']
+                available_cols = [c for c in cols if c in df_display.columns]
+                result_parts.append(df_display[available_cols].to_markdown(index=False))
                 result_parts.append("\n")
 
-                # 计算统计
-                if '持股市值' in df_recent.columns and '今日增持资金' in df_recent.columns:
+                # 当前持仓统计
+                if '持股市值' in df_recent.columns:
                     latest = df_recent.iloc[-1]
-                    result_parts.append(f"\n**最新持仓**: 持股市值 {latest['持股市值']/100000000:.2f} 亿元")
-                    result_parts.append(f"，占流通股 {latest.get('持股数量占A股百分比', 0):.2f}%")
-
-                    # 近期趋势
-                    recent_change = df_recent['今日增持资金'].tail(5).sum()
-                    if recent_change != 0:
-                        direction = "增持" if recent_change > 0 else "减持"
-                        result_parts.append(f"\n**近5日趋势**: {direction} {abs(recent_change)/100000000:.2f} 亿元")
-                    result_parts.append("\n")
+                    result_parts.append(f"\n**当前持仓**：市值 {latest['持股市值']/100000000:.2f} 亿元，占流通股 {latest.get('持股数量占A股百分比', 0):.2f}%\n")
             else:
-                result_parts.append(f"暂无 {stock_code} 的北向资金持股数据\n")
+                result_parts.append(f"⚠️ 该股票未被北向资金持有，请使用前十大股东数据（方案B）判断外资态度\n")
         except Exception as e:
             result_parts.append(f"个股北向持股获取失败: {str(e)}\n")
 

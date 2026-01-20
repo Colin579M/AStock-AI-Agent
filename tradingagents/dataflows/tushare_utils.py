@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 
 import tushare as ts
 import pandas as pd
+import numpy as np
 
 from .retry_utils import (
     retry_with_backoff,
@@ -124,23 +125,92 @@ def _fetch_stock_basic(ts_code: str):
 
 def get_stock_basic_info(stock_code: str) -> str:
     """
-    获取股票基本信息
+    获取股票基本信息（支持模糊搜索）
+
+    支持三种输入方式:
+    1. 股票代码: "601899", "000001", "300750"
+    2. 完整名称: "紫金矿业", "贵州茅台"
+    3. 模糊名称: "紫金", "茅台"
 
     Args:
-        stock_code: 股票代码
+        stock_code: 股票代码或名称
 
     Returns:
         股票基本信息的格式化字符串
     """
     try:
-        ts_code = convert_stock_code(stock_code)
-        df = _fetch_stock_basic(ts_code)
+        pro = get_pro_api()
 
-        if df.empty:
-            return f"[not_found] 未找到股票 {stock_code} 的基本信息。请确认代码正确且股票未退市。"
+        # 1. 判断输入类型：代码 vs 名称
+        clean_code = stock_code.strip()
 
-        row = df.iloc[0]
-        return f"""
+        # 如果是纯数字且长度为6，认为是股票代码
+        if clean_code.isdigit() and len(clean_code) == 6:
+            ts_code = convert_stock_code(clean_code)
+            df = _fetch_stock_basic(ts_code)
+
+            if df.empty:
+                return f"[not_found] 未找到股票 {stock_code} 的基本信息。请确认代码正确且股票未退市。"
+
+            row = df.iloc[0]
+            return _format_stock_basic_info(row)
+
+        # 2. 名称搜索（精确匹配 + 模糊匹配）
+        df_all = pro.stock_basic(
+            exchange='',
+            list_status='L',  # 只搜索上市中的股票
+            fields='ts_code,symbol,name,area,industry,fullname,list_date,market'
+        )
+
+        if df_all.empty:
+            return "[error] 无法获取股票列表数据"
+
+        # 2.1 精确匹配名称
+        exact_match = df_all[df_all['name'] == clean_code]
+        if not exact_match.empty:
+            row = exact_match.iloc[0]
+            return _format_stock_basic_info(row)
+
+        # 2.2 模糊匹配名称（包含关系）
+        fuzzy_match = df_all[df_all['name'].str.contains(clean_code, na=False)]
+
+        if fuzzy_match.empty:
+            # 2.3 尝试匹配全称
+            fuzzy_match = df_all[df_all['fullname'].str.contains(clean_code, na=False)]
+
+        if fuzzy_match.empty:
+            return f"[not_found] 未找到匹配 '{stock_code}' 的股票。请尝试更精确的名称或使用6位代码。"
+
+        if len(fuzzy_match) == 1:
+            row = fuzzy_match.iloc[0]
+            return _format_stock_basic_info(row)
+
+        # 2.4 多个匹配结果，返回候选列表
+        result = [f"## 找到 {len(fuzzy_match)} 个匹配结果，请选择具体股票代码：\n"]
+        result.append("| 代码 | 名称 | 行业 | 地区 |")
+        result.append("|------|------|------|------|")
+
+        for _, row in fuzzy_match.head(10).iterrows():
+            ts_code = row.get('ts_code', 'N/A')
+            name = row.get('name', 'N/A')
+            industry = row.get('industry', 'N/A')
+            area = row.get('area', 'N/A')
+            result.append(f"| {ts_code} | {name} | {industry} | {area} |")
+
+        if len(fuzzy_match) > 10:
+            result.append(f"\n*（仅显示前10个，共{len(fuzzy_match)}个匹配结果）*")
+
+        result.append("\n**提示**: 请使用具体的6位股票代码重新查询。")
+        return "\n".join(result)
+
+    except Exception as e:
+        logger.error(f"获取股票基本信息失败 [{stock_code}]: {e}")
+        return get_tushare_error_message(stock_code, "股票基本信息", e)
+
+
+def _format_stock_basic_info(row) -> str:
+    """格式化单只股票的基本信息"""
+    return f"""
 ## 股票基本信息
 
 - **代码**: {row.get('ts_code', 'N/A')}
@@ -151,9 +221,6 @@ def get_stock_basic_info(stock_code: str) -> str:
 - **上市日期**: {row.get('list_date', 'N/A')}
 - **市场**: {row.get('market', 'N/A')}
 """
-    except Exception as e:
-        logger.error(f"获取股票基本信息失败 [{stock_code}]: {e}")
-        return get_tushare_error_message(stock_code, "股票基本信息", e)
 
 
 def get_financial_statements(stock_code: str) -> str:
@@ -402,7 +469,7 @@ def get_daily_basic(stock_code: str, trade_date: Optional[str] = None) -> str:
             ts_code=ts_code,
             start_date=start_date_3y,
             end_date=end_date,
-            fields='ts_code,trade_date,pe,pb,ps,total_mv,circ_mv,turnover_rate,volume_ratio'
+            fields='ts_code,trade_date,pe,pb,ps,total_mv,circ_mv,turnover_rate,volume_ratio,dv_ratio,dv_ttm'
         )
 
         if df_history.empty:
@@ -497,20 +564,42 @@ def get_daily_basic(stock_code: str, trade_date: Optional[str] = None) -> str:
                 result.append(f"- ✅ 当前PB处于历史**{pb_percentile:.0f}%分位**，估值偏低")
             result.append("")
 
+        # ===== 股息率分析（高息股重要指标）=====
+        latest_dv_ratio = safe_float(df_recent.iloc[0].get('dv_ratio')) if 'dv_ratio' in df_recent.columns else 0
+        latest_dv_ttm = safe_float(df_recent.iloc[0].get('dv_ttm')) if 'dv_ttm' in df_recent.columns else 0
+        # 获取最新PB用于高息股判断
+        current_pb = safe_float(df_recent.iloc[0]['pb']) if pd.notna(df_recent.iloc[0]['pb']) else 0
+
+        if latest_dv_ratio > 0 or latest_dv_ttm > 0:
+            result.append("## 股息率分析\n")
+            result.append(f"- **股息率**: {latest_dv_ratio:.2f}%")
+            result.append(f"- **股息率(TTM)**: {latest_dv_ttm:.2f}%")
+
+            # 高息股判断标准
+            if latest_dv_ratio >= 5:
+                result.append(f"- ✅ **高分红股**: 股息率≥5%，属于高息股")
+                if current_pb > 0 and current_pb < 1:
+                    result.append(f"- ✅ **低估值高分红**: 股息率{latest_dv_ratio:.2f}% + PB{current_pb:.2f}<1，具备安全边际")
+            elif latest_dv_ratio >= 3:
+                result.append(f"- 📊 中等分红: 股息率在3%-5%之间")
+            elif latest_dv_ratio > 0:
+                result.append(f"- 📊 普通分红: 股息率<3%")
+            result.append("")
+
         # ===== 近期估值数据 =====
         result.append("## 每日估值数据（最近10个交易日）\n")
-        result.append("| 日期 | PE(TTM) | PB | PS | 总市值(亿) | 流通市值(亿) | 换手率(%) | 量比 |")
-        result.append("|------|---------|-----|-----|-----------|------------|----------|------|")
+        result.append("| 日期 | PE(TTM) | PB | PS | 股息率(%) | 总市值(亿) | 流通市值(亿) | 换手率(%) |")
+        result.append("|------|---------|-----|-----|----------|-----------|------------|----------|")
 
         for _, row in df_recent.iterrows():
             pe = row['pe'] if pd.notna(row['pe']) else 0
             pb = row['pb'] if pd.notna(row['pb']) else 0
             ps = row['ps'] if pd.notna(row['ps']) else 0
+            dv_ratio = row.get('dv_ratio', 0) if pd.notna(row.get('dv_ratio')) else 0
             total_mv = row['total_mv'] / 10000 if pd.notna(row['total_mv']) else 0
             circ_mv = row['circ_mv'] / 10000 if pd.notna(row['circ_mv']) else 0
             turnover = row['turnover_rate'] if pd.notna(row['turnover_rate']) else 0
-            volume_ratio = row['volume_ratio'] if pd.notna(row['volume_ratio']) else 0
-            result.append(f"| {row['trade_date']} | {pe:.2f} | {pb:.2f} | {ps:.2f} | {total_mv:.2f} | {circ_mv:.2f} | {turnover:.2f} | {volume_ratio:.2f} |")
+            result.append(f"| {row['trade_date']} | {pe:.2f} | {pb:.2f} | {ps:.2f} | {dv_ratio:.2f} | {total_mv:.2f} | {circ_mv:.2f} | {turnover:.2f} |")
 
         result.append("")
         return "\n".join(result)
@@ -682,14 +771,19 @@ def get_holder_number(stock_code: str) -> str:
 
 def get_moneyflow(stock_code: str, days: int = 10) -> str:
     """
-    获取个股资金流向
+    获取个股资金流向（含主力态度判断）
+
+    分析维度:
+    - 特大单（>100万）: 机构/大户行为
+    - 大单（20-100万）: 中大资金行为
+    - 主力合计 = 特大单 + 大单: 代表主力资金整体态度
 
     Args:
         stock_code: 股票代码
-        days: 获取天数
+        days: 获取天数，默认10天
 
     Returns:
-        资金流向的格式化字符串
+        资金流向的格式化字符串，包含主力态度判断
     """
     try:
         pro = get_pro_api()
@@ -706,35 +800,94 @@ def get_moneyflow(stock_code: str, days: int = 10) -> str:
         df = df.head(days)
 
         result = []
-        result.append("# 资金流向分析\n")
-        result.append("## 每日资金流向（单位：万元）\n")
-        result.append("| 日期 | 大单净流入 | 中单净流入 | 小单净流入 | 净流入合计 |")
-        result.append("|------|-----------|-----------|-----------|-----------|")
+        result.append(f"# {ts_code} 资金流向分析\n")
 
+        # 计算累计数据
+        total_elg_net = 0  # 特大单净额
+        total_lg_net = 0   # 大单净额
+        total_md_net = 0   # 中单净额
+        total_sm_net = 0   # 小单净额
+        total_net = 0      # 总净额
+
+        daily_data = []
         for _, row in df.iterrows():
-            # 计算各档净流入
+            # 特大单（>100万）
+            elg_net = (row.get('buy_elg_amount', 0) - row.get('sell_elg_amount', 0)) / 10000
+            # 大单（20-100万）
             lg_net = (row.get('buy_lg_amount', 0) - row.get('sell_lg_amount', 0)) / 10000
+            # 中单
             md_net = (row.get('buy_md_amount', 0) - row.get('sell_md_amount', 0)) / 10000
+            # 小单
             sm_net = (row.get('buy_sm_amount', 0) - row.get('sell_sm_amount', 0)) / 10000
-            total_net = row.get('net_mf_amount', 0) / 10000
+            # 主力合计
+            main_net = elg_net + lg_net
 
-            result.append(f"| {row['trade_date']} | {lg_net:+.2f} | {md_net:+.2f} | {sm_net:+.2f} | {total_net:+.2f} |")
+            total_elg_net += elg_net
+            total_lg_net += lg_net
+            total_md_net += md_net
+            total_sm_net += sm_net
+            total_net += row.get('net_mf_amount', 0) / 10000
 
-        result.append("")
+            daily_data.append({
+                'date': row['trade_date'],
+                'elg_net': elg_net,
+                'lg_net': lg_net,
+                'main_net': main_net,
+                'md_net': md_net,
+                'sm_net': sm_net
+            })
 
-        # 汇总分析
-        total_lg_net = sum((row.get('buy_lg_amount', 0) - row.get('sell_lg_amount', 0)) for _, row in df.iterrows()) / 10000
-        total_net = df['net_mf_amount'].sum() / 10000
+        # 主力合计
+        total_main_net = total_elg_net + total_lg_net
 
-        result.append(f"**{days}日大单净流入合计**: {total_lg_net:+.2f}万元")
-        result.append(f"**{days}日资金净流入合计**: {total_net:+.2f}万元")
+        # 主力态度判断
+        if total_main_net > 1000:  # >1000万净流入
+            attitude = "强势增持"
+            attitude_emoji = "🟢🟢"
+        elif total_main_net > 0:
+            attitude = "小幅净流入"
+            attitude_emoji = "🟢"
+        elif total_main_net > -1000:
+            attitude = "小幅净流出"
+            attitude_emoji = "🔴"
+        else:  # < -1000万
+            attitude = "持续减持"
+            attitude_emoji = "🔴🔴"
 
-        if total_net > 0:
-            result.append("**资金面分析**: 近期资金持续流入，买盘力量较强")
+        # 输出汇总
+        result.append("## 主力资金汇总（近{}日）\n".format(days))
+        result.append("| 资金类型 | 净流入(万元) | 说明 |")
+        result.append("|---------|-------------|------|")
+        result.append(f"| 特大单(>100万) | {total_elg_net:+,.0f} | 机构/大户 |")
+        result.append(f"| 大单(20-100万) | {total_lg_net:+,.0f} | 中大资金 |")
+        result.append(f"| **主力合计** | **{total_main_net:+,.0f}** | 特大+大单 |")
+        result.append(f"| 中单 | {total_md_net:+,.0f} | 中小资金 |")
+        result.append(f"| 小单 | {total_sm_net:+,.0f} | 散户 |")
+        result.append(f"| 总净流入 | {total_net:+,.0f} | 全部 |")
+
+        result.append(f"\n## 主力态度判断\n")
+        result.append(f"- **主力态度**: {attitude_emoji} {attitude}")
+        result.append(f"- **主力净流入**: {total_main_net:+,.0f}万元")
+
+        # 资金结构分析
+        if total_main_net > 0 and total_sm_net < 0:
+            result.append(f"- **资金结构**: 主力吸筹，散户出货（良性换手）")
+        elif total_main_net < 0 and total_sm_net > 0:
+            result.append(f"- **资金结构**: 主力出货，散户接盘（风险信号）")
+        elif total_main_net > 0 and total_sm_net > 0:
+            result.append(f"- **资金结构**: 全面流入，市场看多")
         else:
-            result.append("**资金面分析**: 近期资金持续流出，卖盘压力较大")
-        result.append("")
+            result.append(f"- **资金结构**: 全面流出，市场看空")
 
+        # 每日明细
+        result.append("\n## 每日明细（单位：万元）\n")
+        result.append("| 日期 | 特大单净 | 大单净 | 主力净 | 中单净 | 小单净 |")
+        result.append("|------|---------|--------|--------|--------|--------|")
+
+        for d in daily_data[:10]:
+            result.append(f"| {d['date']} | {d['elg_net']:+.0f} | {d['lg_net']:+.0f} | {d['main_net']:+.0f} | {d['md_net']:+.0f} | {d['sm_net']:+.0f} |")
+
+        result.append("")
         return "\n".join(result)
 
     except Exception as e:
@@ -878,15 +1031,337 @@ def get_pmi() -> str:
         return f"获取PMI数据失败: {str(e)}"
 
 
-def get_dividend(stock_code: str) -> str:
+def calculate_ttm_dividend(df: pd.DataFrame, ts_code: str = None) -> tuple:
     """
-    获取分红送股历史
+    计算TTM分红（过去12个月所有分红累加）
+
+    逻辑：
+    1. 优先按除权日(ex_date)筛选过去12个月的分红记录
+    2. 若无ex_date，按年报日期(end_date)筛选最近完整年度的所有分红
+    3. 累加所有符合条件的现金分红
+
+    Args:
+        df: 分红数据DataFrame（需包含cash_div, ex_date或end_date列）
+        ts_code: 股票代码（用于日志）
+
+    Returns:
+        (ttm_dividend, dividend_details, count, date_range)
+        - ttm_dividend: TTM分红金额
+        - dividend_details: 分红明细列表 [{"date": "2024-06-20", "amount": 0.98, "type": "中期"}]
+        - count: 分红次数
+        - date_range: 统计区间 "2024-01-19 至 2025-01-19"
+    """
+    if df.empty:
+        return 0, [], 0, ""
+
+    today = datetime.now()
+    one_year_ago = today - timedelta(days=365)
+
+    # 筛选有效现金分红记录
+    df_valid = df[df['cash_div'].notna() & (df['cash_div'] > 0)].copy()
+    if df_valid.empty:
+        return 0, [], 0, ""
+
+    # 尝试用除权日筛选过去12个月
+    df_ttm = pd.DataFrame()
+    date_range = ""
+
+    if 'ex_date' in df_valid.columns:
+        # 清洗ex_date列
+        df_valid['ex_date_clean'] = df_valid['ex_date'].apply(
+            lambda x: str(x) if pd.notna(x) and x != '' else None
+        )
+        df_with_ex = df_valid[df_valid['ex_date_clean'].notna()].copy()
+
+        if not df_with_ex.empty:
+            try:
+                df_with_ex['ex_date_dt'] = pd.to_datetime(df_with_ex['ex_date_clean'], errors='coerce')
+                mask = df_with_ex['ex_date_dt'] >= one_year_ago
+                df_ttm = df_with_ex[mask]
+
+                if not df_ttm.empty:
+                    date_range = f"{one_year_ago.strftime('%Y-%m-%d')} 至 {today.strftime('%Y-%m-%d')}"
+            except Exception:
+                pass
+
+    # 回退：若无有效除权日，取最近完整年度的所有分红
+    if df_ttm.empty and 'end_date' in df_valid.columns:
+        # 找到最近年度
+        df_valid['year'] = df_valid['end_date'].astype(str).str[:4]
+        latest_year = df_valid['year'].max()
+        if latest_year:
+            df_ttm = df_valid[df_valid['year'] == latest_year]
+            date_range = f"{latest_year}年度全部分红"
+
+    # 如果仍为空，取最近一条
+    if df_ttm.empty:
+        df_ttm = df_valid.head(1)
+        date_range = "最近一次分红"
+
+    # 累加计算
+    ttm_div = float(df_ttm['cash_div'].sum())
+    count = len(df_ttm)
+
+    # 生成明细
+    details = []
+    for _, row in df_ttm.iterrows():
+        ex_date = row.get('ex_date', '')
+        end_date = row.get('end_date', 'N/A')
+        cash_div = float(row.get('cash_div', 0))
+
+        # 推断分红类型
+        if pd.notna(end_date):
+            month = str(end_date)[4:6] if len(str(end_date)) >= 6 else ""
+            if month in ['06', '07']:
+                div_type = "中期"
+            elif month in ['12', '01']:
+                div_type = "年终"
+            else:
+                div_type = "其他"
+        else:
+            div_type = ""
+
+        date_str = ex_date if pd.notna(ex_date) and ex_date else end_date
+        details.append({
+            "date": str(date_str),
+            "amount": cash_div,
+            "type": div_type,
+            "end_date": str(end_date)
+        })
+
+    return ttm_div, details, count, date_range
+
+
+def calculate_historical_yield_percentiles(
+    ts_code: str,
+    df_dividend: pd.DataFrame,
+    years: int = 5
+) -> dict:
+    """
+    计算历史股息率分位数（使用真实历史股价）
+
+    逻辑：
+    1. 获取过去N年每年年末的收盘价
+    2. 计算每年的年度累计分红
+    3. 历史股息率 = 年度分红 / 年末收盘价
+    4. 返回25%/50%/75%分位
+
+    Args:
+        ts_code: Tushare格式股票代码
+        df_dividend: 分红数据DataFrame
+        years: 回溯年数，默认5年
+
+    Returns:
+        {
+            "yield_25_pct": 3.5,   # 较低股息率（乐观情景）
+            "yield_50_pct": 4.5,   # 中位数（中性情景）
+            "yield_75_pct": 5.5,   # 较高股息率（悲观情景）
+            "yield_min": 2.0,
+            "yield_max": 7.0,
+            "data_source": "历史5年分位计算" | "行业经验值",
+            "sample_years": 5,
+            "yearly_data": [{"year": "2023", "dividend": 2.55, "close": 41.0, "yield": 6.22}],
+            "success": True
+        }
+    """
+    result = {
+        "yield_25_pct": None,
+        "yield_50_pct": None,
+        "yield_75_pct": None,
+        "yield_min": None,
+        "yield_max": None,
+        "data_source": "",
+        "sample_years": 0,
+        "yearly_data": [],
+        "success": False
+    }
+
+    try:
+        pro = get_pro_api()
+
+        # 1. 获取过去N年的年末收盘价
+        current_year = datetime.now().year
+        year_end_prices = {}
+
+        for y in range(current_year - years, current_year):
+            # 尝试获取该年最后一个交易日的收盘价
+            year_end = f"{y}1231"
+            year_start = f"{y}1201"
+
+            try:
+                df_price = pro.daily(
+                    ts_code=ts_code,
+                    start_date=year_start,
+                    end_date=year_end,
+                    fields='trade_date,close'
+                )
+                if not df_price.empty:
+                    # 取该期间最后一个交易日
+                    year_end_prices[str(y)] = float(df_price.iloc[0]['close'])
+            except Exception:
+                continue
+
+        if len(year_end_prices) < 3:
+            result["data_source"] = "历史数据不足，无法计算分位"
+            return result
+
+        # 2. 计算每年的年度累计分红
+        df_valid = df_dividend[df_dividend['cash_div'].notna() & (df_dividend['cash_div'] > 0)].copy()
+        if 'end_date' in df_valid.columns:
+            df_valid['year'] = df_valid['end_date'].astype(str).str[:4]
+        else:
+            result["data_source"] = "分红数据缺少年度信息"
+            return result
+
+        # 按年度汇总分红
+        yearly_dividends = df_valid.groupby('year')['cash_div'].sum().to_dict()
+
+        # 3. 计算各年度股息率
+        yearly_yields = []
+        yearly_data = []
+
+        for year, close_price in year_end_prices.items():
+            div_amount = yearly_dividends.get(year, 0)
+            if div_amount > 0 and close_price > 0:
+                yield_pct = (div_amount / close_price) * 100
+                yearly_yields.append(yield_pct)
+                yearly_data.append({
+                    "year": year,
+                    "dividend": round(div_amount, 3),
+                    "close": round(close_price, 2),
+                    "yield": round(yield_pct, 2)
+                })
+
+        if len(yearly_yields) < 3:
+            result["data_source"] = "有效年度数据不足3年"
+            return result
+
+        # 4. 计算分位数
+        yields_array = np.array(yearly_yields)
+        result["yield_min"] = round(float(yields_array.min()), 2)
+        result["yield_25_pct"] = round(float(np.percentile(yields_array, 25)), 2)
+        result["yield_50_pct"] = round(float(np.percentile(yields_array, 50)), 2)
+        result["yield_75_pct"] = round(float(np.percentile(yields_array, 75)), 2)
+        result["yield_max"] = round(float(yields_array.max()), 2)
+        result["data_source"] = f"历史{len(yearly_yields)}年分位计算"
+        result["sample_years"] = len(yearly_yields)
+        result["yearly_data"] = sorted(yearly_data, key=lambda x: x['year'], reverse=True)
+        result["success"] = True
+
+    except Exception as e:
+        logger.warning(f"计算历史股息率分位失败: {e}")
+        result["data_source"] = f"计算失败: {str(e)}"
+
+    return result
+
+
+def identify_special_dividends(df_valid: pd.DataFrame, avg_div: float) -> tuple:
+    """
+    识别特殊分红记录
+
+    规则：
+    1. 单次分红金额超过近5年均值200%
+    2. 送股+转增比例>5（高送转）
+
+    Args:
+        df_valid: 有效分红记录DataFrame
+        avg_div: 平均分红金额
+
+    Returns:
+        (special_indices, special_records): 特殊分红索引列表和记录详情
+    """
+    special_indices = []
+    special_records = []
+
+    for idx, row in df_valid.iterrows():
+        cash_div = row.get('cash_div', 0) or 0
+        stk_div = row.get('stk_div', 0) or 0
+        stk_bo = row.get('stk_bo_rate', 0) or 0
+        end_date = row.get('end_date', 'N/A')
+
+        # 规则1：超过均值200%
+        if avg_div > 0 and cash_div > avg_div * 2:
+            special_indices.append(idx)
+            special_records.append(f"{end_date}年度{cash_div:.3f}元（超均值200%）")
+            continue
+
+        # 规则2：高送转
+        if (stk_div + stk_bo) > 5:
+            special_indices.append(idx)
+            special_records.append(f"{end_date}年度高送转（送{stk_div:.0f}转{stk_bo:.0f}）")
+            continue
+
+    return special_indices, special_records
+
+
+def select_dividend_base(recent_div: float, avg_3y_div: float, avg_5y_div: float) -> tuple:
+    """
+    分红基数选择规则
+
+    规则：
+    1. 默认使用TTM分红（近1年分红）
+    2. 若当年分红较3年均值波动超过±50%，则使用近3年平均
+
+    Args:
+        recent_div: 近1年分红
+        avg_3y_div: 近3年平均分红
+        avg_5y_div: 近5年平均分红
+
+    Returns:
+        (selected_base, reason): 选定的基数和选择原因
+    """
+    if avg_3y_div <= 0:
+        return recent_div, "TTM分红（无历史对比数据）"
+
+    # 检测异常波动
+    volatility = abs(recent_div - avg_3y_div) / avg_3y_div if avg_3y_div > 0 else 0
+
+    if volatility > 0.5:
+        # 波动超过50%，使用3年平均
+        return avg_3y_div, f"近3年平均（TTM波动{volatility*100:.0f}%>50%）"
+    else:
+        return recent_div, "TTM分红（近12个月）"
+
+
+def calculate_cv_excluding_special(df_valid: pd.DataFrame, special_indices: list) -> tuple:
+    """
+    剔除特殊分红后计算波动系数
+
+    Args:
+        df_valid: 有效分红记录DataFrame
+        special_indices: 特殊分红索引列表
+
+    Returns:
+        (cv, excluded_info, sample_count): 波动系数、剔除信息、有效样本数
+    """
+    # 剔除特殊分红
+    df_normal = df_valid.drop(special_indices, errors='ignore')
+
+    if len(df_normal) < 3:
+        return None, "有效常规分红记录不足3年", 0
+
+    # 使用近5年数据计算
+    div_values = df_normal.head(5)['cash_div']
+    div_std = div_values.std()
+    div_mean = div_values.mean()
+    cv = (div_std / div_mean) * 100 if div_mean > 0 else 100
+
+    excluded_count = len(special_indices)
+    excluded_info = f"剔除{excluded_count}条特殊分红" if excluded_count > 0 else "无特殊分红"
+
+    return cv, excluded_info, len(div_values)
+
+
+def get_dividend(stock_code: str, current_price: Optional[float] = None) -> str:
+    """
+    获取分红送股历史及股息率估值数据
 
     Args:
         stock_code: 股票代码
+        current_price: 当前股价（可选，若不提供则自动获取）
 
     Returns:
-        分红历史的格式化字符串
+        分红历史及股息率估值数据的格式化字符串
     """
     try:
         pro = get_pro_api()
@@ -897,31 +1372,221 @@ def get_dividend(stock_code: str) -> str:
         if df.empty:
             return f"未找到股票 {stock_code} 的分红历史"
 
-        df = df.head(10)  # 最近10次
+        # 安全转换函数
+        def safe_float(val, default=0.0):
+            if val is None or pd.isna(val):
+                return default
+            return float(val)
+
+        # ===== 获取当前股价（若未提供）=====
+        if current_price is None or current_price <= 0:
+            try:
+                end_date = datetime.now().strftime('%Y%m%d')
+                recent_start = (datetime.now() - timedelta(days=10)).strftime('%Y%m%d')
+                df_daily = pro.daily(ts_code=ts_code, start_date=recent_start, end_date=end_date, fields='trade_date,close')
+                if not df_daily.empty:
+                    current_price = safe_float(df_daily.iloc[0]['close'])
+            except Exception as e:
+                logger.warning(f"获取收盘价失败: {e}")
+                current_price = 0.0
+
+        # ===== 分红历史表格 =====
+        df_display = df.head(10)  # 展示最近10次
 
         result = []
         result.append("# 分红送股历史\n")
         result.append("| 分红年度 | 每股分红(元) | 送股(股) | 转增(股) | 除权日 |")
         result.append("|---------|------------|---------|---------|--------|")
 
-        for _, row in df.iterrows():
+        for _, row in df_display.iterrows():
             end_date = row.get('end_date', 'N/A')
-            cash_div = row.get('cash_div', 0) if pd.notna(row.get('cash_div')) else 0
-            stk_div = row.get('stk_div', 0) if pd.notna(row.get('stk_div')) else 0
-            stk_bo = row.get('stk_bo_rate', 0) if pd.notna(row.get('stk_bo_rate')) else 0
+            cash_div = safe_float(row.get('cash_div', 0))
+            stk_div = safe_float(row.get('stk_div', 0))
+            stk_bo = safe_float(row.get('stk_bo_rate', 0))
             ex_date = row.get('ex_date', 'N/A')
-            result.append(f"| {end_date} | {cash_div:.2f} | {stk_div:.2f} | {stk_bo:.2f} | {ex_date} |")
+            result.append(f"| {end_date} | {cash_div:.3f} | {stk_div:.2f} | {stk_bo:.2f} | {ex_date} |")
 
         result.append("")
 
-        # 计算近3年平均股息率（简化计算）
-        recent_cash = df.head(3)['cash_div'].sum()
-        result.append(f"**近3年累计分红**: {recent_cash:.2f}元/股")
+        # ===== 提取分红数据 =====
+        # 筛选有效分红记录（现金分红>0）
+        df_valid = df[df['cash_div'].notna() & (df['cash_div'] > 0)].copy()
+        record_count = len(df_valid)
+
+        # ===== 计算TTM分红（累加过去12个月所有分红）=====
+        ttm_div, ttm_details, ttm_count, ttm_date_range = calculate_ttm_dividend(df, ts_code)
+
+        # 近3年平均分红（按年度汇总后平均，需按年份降序排列取最近N年）
+        if 'end_date' in df_valid.columns:
+            df_valid['year'] = df_valid['end_date'].astype(str).str[:4]
+            yearly_sums = df_valid.groupby('year')['cash_div'].sum().sort_index(ascending=False)
+            avg_3y_div = safe_float(yearly_sums.head(3).mean()) if len(yearly_sums) >= 1 else 0
+            avg_5y_div = safe_float(yearly_sums.head(5).mean()) if len(yearly_sums) >= 1 else 0
+        else:
+            avg_3y_div = safe_float(df_valid.head(3)['cash_div'].mean()) if record_count >= 1 else 0
+            avg_5y_div = safe_float(df_valid.head(5)['cash_div'].mean()) if record_count >= 1 else 0
+
+        # ===== 识别特殊分红 =====
+        special_indices, special_records = identify_special_dividends(df_valid.head(5), avg_5y_div)
+
+        # ===== 选择估值基数（使用TTM分红）=====
+        selected_base, base_reason = select_dividend_base(ttm_div, avg_3y_div, avg_5y_div)
+
+        # ===== 输出TTM分红信息 =====
+        result.append("## 分红数据汇总\n")
+        result.append(f"**TTM分红（近12个月累计）**: {ttm_div:.3f}元")
+
+        if ttm_count > 1:
+            result.append(f"- 分红次数：{ttm_count}次")
+            result.append(f"- 统计区间：{ttm_date_range}")
+            result.append("- 分红明细：")
+            for detail in ttm_details:
+                type_str = f"（{detail['type']}）" if detail['type'] else ""
+                result.append(f"  - {detail['date']}: {detail['amount']:.3f}元{type_str}")
+        elif ttm_count == 1:
+            result.append(f"- 统计说明：{ttm_date_range}（单次分红）")
+
         result.append("")
+        result.append(f"**近3年年均分红**: {avg_3y_div:.3f}元/年")
+        result.append(f"**近5年年均分红**: {avg_5y_div:.3f}元/年")
+        result.append("")
+        result.append(f"**📌 估值基数选择**: {selected_base:.3f}元 ({base_reason})")
+        if special_records:
+            result.append(f"**⚠️ 特殊分红识别**: {'; '.join(special_records)}")
+        result.append("")
+
+        # ===== 当前股息率计算（使用TTM分红）=====
+        if current_price > 0 and ttm_div > 0:
+            current_yield = (ttm_div / current_price) * 100
+            result.append(f"**当前股价**: {current_price:.2f}元")
+            result.append(f"**当前股息率**: {current_yield:.2f}%（TTM分红{ttm_div:.3f}元 ÷ 股价{current_price:.2f}元）")
+            result.append("")
+
+            # ===== 股息率历史分位计算（使用真实历史股价）=====
+            hist_yield = calculate_historical_yield_percentiles(ts_code, df, years=5)
+
+            if hist_yield["success"]:
+                result.append("## 股息率历史分位（真实历史股价计算）\n")
+                result.append("| 最小值 | 25%分位 | 中位数 | 75%分位 | 最大值 | 样本年数 |")
+                result.append("|--------|---------|--------|---------|--------|---------|")
+                result.append(f"| {hist_yield['yield_min']:.2f}% | {hist_yield['yield_25_pct']:.2f}% | {hist_yield['yield_50_pct']:.2f}% | {hist_yield['yield_75_pct']:.2f}% | {hist_yield['yield_max']:.2f}% | {hist_yield['sample_years']}年 |")
+                result.append(f"\n**数据来源**: {hist_yield['data_source']}")
+                result.append("")
+
+                # 年度明细表
+                if hist_yield["yearly_data"]:
+                    result.append("**年度股息率明细**:")
+                    result.append("| 年度 | 年度分红(元) | 年末股价(元) | 股息率 |")
+                    result.append("|------|-------------|-------------|--------|")
+                    for yd in hist_yield["yearly_data"][:5]:
+                        result.append(f"| {yd['year']} | {yd['dividend']:.3f} | {yd['close']:.2f} | {yd['yield']:.2f}% |")
+                    result.append("")
+
+                # 当前股息率分位评估
+                if current_yield <= hist_yield['yield_25_pct']:
+                    result.append(f"**当前股息率{current_yield:.2f}%位于历史低位**（<25%分位），股价可能被高估")
+                elif current_yield >= hist_yield['yield_75_pct']:
+                    result.append(f"**当前股息率{current_yield:.2f}%位于历史高位**（>75%分位），股价可能被低估")
+                else:
+                    result.append(f"**当前股息率{current_yield:.2f}%位于历史中位区间**")
+                result.append("")
+
+            else:
+                # 回退行业固定区间
+                result.append("## 股息率参考区间（行业经验值）\n")
+                result.append(f"⚠️ {hist_yield['data_source']}，使用行业经验值，**置信度-10%**\n")
+                result.append("| 行业 | 25%分位 | 中位数 | 75%分位 | 说明 |")
+                result.append("|------|---------|--------|---------|------|")
+                result.append("| 公用事业(电力) | 3.0% | 3.5% | 4.5% | 长江电力等 |")
+                result.append("| 银行 | 4.0% | 5.0% | 6.0% | 国有大行 |")
+                result.append("| 煤炭 | 4.0% | 5.5% | 7.0% | 中国神华等 |")
+                result.append("| 高速公路 | 4.0% | 5.0% | 7.0% | 现金流稳定 |")
+                result.append("| 港口 | 3.5% | 4.5% | 6.0% | 周期性较弱 |")
+                result.append("")
+
+            # ===== 股息率目标价参考（使用历史分位或行业经验值）=====
+            result.append("## 股息率目标价参考\n")
+            result.append("**用于高股息股票（公用事业/银行/煤炭/高速公路）的估值交叉验证**\n")
+            result.append(f"**估值基数**: {selected_base:.3f}元 ({base_reason})\n")
+
+            # 使用历史分位或行业经验值生成目标股息率
+            if hist_yield["success"]:
+                yield_pessimistic = hist_yield['yield_75_pct']  # 高股息率 = 悲观
+                yield_neutral = hist_yield['yield_50_pct']      # 中位数 = 中性
+                yield_optimistic = hist_yield['yield_25_pct']   # 低股息率 = 乐观
+                yield_source = "历史分位"
+            else:
+                # 默认使用煤炭/高股息行业经验值
+                yield_pessimistic = 7.0
+                yield_neutral = 5.5
+                yield_optimistic = 4.0
+                yield_source = "行业经验值"
+
+            result.append(f"**目标股息率来源**: {yield_source}\n")
+            result.append("| 情景 | 目标股息率 | 对应目标价 | 较当前涨跌幅 |")
+            result.append("|------|-----------|-----------|------------|")
+
+            scenarios = [
+                ("悲观（高收益要求）", yield_pessimistic),
+                ("中性", yield_neutral),
+                ("乐观（低收益接受）", yield_optimistic),
+            ]
+
+            for scenario, target_yield in scenarios:
+                if selected_base > 0 and target_yield > 0:
+                    target_price = selected_base / (target_yield / 100)
+                    change_pct = (target_price - current_price) / current_price * 100
+                    result.append(f"| {scenario} | {target_yield:.1f}% | {target_price:.2f}元 | {change_pct:+.1f}% |")
+
+            # 计算加权目标价
+            if selected_base > 0:
+                weighted_price = (
+                    0.25 * (selected_base / (yield_pessimistic / 100)) +
+                    0.50 * (selected_base / (yield_neutral / 100)) +
+                    0.25 * (selected_base / (yield_optimistic / 100))
+                )
+                weighted_change = (weighted_price - current_price) / current_price * 100
+                result.append(f"| **加权（25/50/25）** | - | **{weighted_price:.2f}元** | **{weighted_change:+.1f}%** |")
+
+            result.append("")
+            result.append(f"**计算公式**: 目标价 = 估值基数({selected_base:.3f}元) ÷ 目标股息率")
+            result.append("")
+
+            # ===== 分红稳定性评估（剔除特殊分红）=====
+            if record_count >= 3:
+                div_cv, excluded_info, sample_count = calculate_cv_excluding_special(
+                    df_valid.head(5), special_indices
+                )
+
+                result.append("## 分红稳定性评估\n")
+
+                if special_records:
+                    result.append(f"**剔除记录**: {'; '.join(special_records)}")
+                    result.append(f"**有效样本**: 近{sample_count}年常规分红（{excluded_info}）")
+                    result.append("")
+
+                if div_cv is not None:
+                    if div_cv < 10:
+                        result.append(f"✅ **分红非常稳定**：波动系数{div_cv:.1f}%（<10%），适合股息率估值")
+                    elif div_cv < 30:
+                        result.append(f"⚠️ **分红较稳定**：波动系数{div_cv:.1f}%（10%-30%），股息率估值可参考")
+                    else:
+                        result.append(f"❌ **分红波动较大**：波动系数{div_cv:.1f}%（>30%），股息率估值置信度较低")
+                else:
+                    result.append(f"⚠️ {excluded_info}，无法计算波动系数")
+                result.append("")
+
+        else:
+            if ttm_div <= 0:
+                result.append("⚠️ **无现金分红记录**，不适用股息率估值法")
+            elif current_price <= 0:
+                result.append("⚠️ 无法获取当前股价，股息率相关计算略过")
+            result.append("")
 
         return "\n".join(result)
 
     except Exception as e:
+        logger.error(f"获取分红历史失败: {str(e)}")
         return f"获取分红历史失败: {str(e)}"
 
 
@@ -1064,13 +1729,13 @@ def get_china_stock_sentiment(stock_code: str) -> str:
     # 资金流向
     result.append(get_moneyflow(stock_code))
 
-    # 北向资金
-    result.append(get_hsgt_flow())
+    # 北向资金（使用十大成交股替代已停更的整体流向）
+    result.append(get_hsgt_top10())
 
     # 融资融券
     result.append(get_margin_data(stock_code))
 
-    # 股东数据
+    # 股东数据（含香港中央结算持股比例）
     result.append(get_top10_holders(stock_code))
     result.append(get_holder_number(stock_code))
 
@@ -1290,13 +1955,13 @@ def get_pledge_stat(stock_code: str) -> str:
 
 def get_share_float(stock_code: str) -> str:
     """
-    获取限售解禁日历
+    获取限售解禁日历（精简版，只返回汇总和前20大股东）
 
     Args:
         stock_code: 股票代码
 
     Returns:
-        格式化字符串，包含未来解禁日期、解禁数量及占比
+        格式化字符串，包含解禁汇总统计和前20大股东明细
     """
     try:
         pro = get_pro_api()
@@ -1312,7 +1977,7 @@ def get_share_float(stock_code: str) -> str:
         future_date = (datetime.now() + timedelta(days=180)).strftime('%Y%m%d')
 
         # 过滤未来解禁
-        df_future = df[(df['float_date'] >= today) & (df['float_date'] <= future_date)]
+        df_future = df[(df['float_date'] >= today) & (df['float_date'] <= future_date)].copy()
 
         result = []
         result.append("# 限售解禁日历\n")
@@ -1321,31 +1986,64 @@ def get_share_float(stock_code: str) -> str:
             result.append("## 未来6个月无重大解禁\n")
             result.append("该股票未来6个月内暂无限售股解禁安排。\n")
         else:
-            result.append("## 未来6个月解禁计划\n")
+            # 计算汇总统计
+            df_future['float_share_wan'] = df_future['float_share'].fillna(0) / 10000
+            total_float = df_future['float_share_wan'].sum()
+            total_ratio = df_future['float_ratio'].fillna(0).sum()
+            total_holders = len(df_future)
+
+            # 按解禁日期分组统计
+            date_summary = df_future.groupby('float_date').agg({
+                'float_share_wan': 'sum',
+                'float_ratio': 'sum'
+            }).reset_index()
+
+            result.append("## 解禁汇总统计\n")
+            result.append(f"- **未来6个月累计解禁**: {total_float:.2f}万股")
+            result.append(f"- **占总股本比例**: {total_ratio:.2f}%")
+            result.append(f"- **解禁股东数量**: {total_holders}个")
+            result.append("")
+
+            # 按日期汇总（最多显示5个日期）
+            result.append("## 解禁日期分布\n")
+            result.append("| 解禁日期 | 解禁数量(万股) | 占总股本(%) |")
+            result.append("|---------|--------------|------------|")
+            for _, row in date_summary.head(5).iterrows():
+                result.append(f"| {row['float_date']} | {row['float_share_wan']:.2f} | {row['float_ratio']:.2f} |")
+            if len(date_summary) > 5:
+                result.append(f"| ... | 共{len(date_summary)}个解禁日期 | ... |")
+            result.append("")
+
+            # 只显示前20大股东（按解禁数量降序）
+            df_top20 = df_future.nlargest(20, 'float_share_wan')
+
+            result.append("## 前20大解禁股东\n")
             result.append("| 解禁日期 | 解禁数量(万股) | 占总股本(%) | 股东名称 | 解禁类型 |")
             result.append("|---------|--------------|------------|---------|---------|")
 
-            total_float = 0
-            for _, row in df_future.iterrows():
+            for _, row in df_top20.iterrows():
                 float_date = row.get('float_date', 'N/A')
-                float_share = row.get('float_share', 0) / 10000 if pd.notna(row.get('float_share')) else 0
+                float_share = row['float_share_wan']
                 float_ratio = row.get('float_ratio', 0) if pd.notna(row.get('float_ratio')) else 0
-                holder_name = row.get('holder_name', 'N/A')[:15] if row.get('holder_name') else 'N/A'
+                holder_name = row.get('holder_name', 'N/A')[:20] if row.get('holder_name') else 'N/A'
                 share_type = row.get('share_type', 'N/A')
 
                 result.append(f"| {float_date} | {float_share:.2f} | {float_ratio:.2f} | {holder_name} | {share_type} |")
-                total_float += float_share
+
+            if total_holders > 20:
+                result.append(f"\n*注：共{total_holders}个股东，仅显示前20大*")
 
             result.append("")
-            result.append(f"**未来6个月累计解禁**: {total_float:.2f}万股")
 
             # 风险提示
             if total_float > 10000:  # 超过1亿股
                 result.append("**风险提示**: 解禁规模较大，可能对股价形成压力")
+            elif total_ratio > 10:  # 占比超过10%
+                result.append("**风险提示**: 解禁占比较高，关注减持公告")
 
         result.append("")
 
-        # 显示历史解禁情况
+        # 显示历史解禁情况（最多5条）
         df_past = df[df['float_date'] < today].head(5)
         if not df_past.empty:
             result.append("## 近期已解禁记录\n")
@@ -1438,6 +2136,132 @@ def get_index_daily(index_code: str, days: int = 60) -> str:
 
     except Exception as e:
         return f"获取指数行情数据失败: {str(e)}"
+
+
+def get_sector_benchmark_data(stock_code: str, days: int = 60) -> str:
+    """
+    智能获取个股所属行业的板块指数数据。
+    只需传入个股代码，自动查找其行业并返回对应行业指数走势。
+
+    这是一个"傻瓜化"工具，Agent只需要传入股票代码，Python内部会自动：
+    1. 查询股票所属行业
+    2. 映射到对应的行业指数（采用三级fallback策略）
+    3. 获取指数数据并返回
+
+    三级 fallback 策略：
+    - Level 1: 行业映射（根据行业名称匹配对应行业指数）
+    - Level 2: 市场板块（科创板→科创50，创业板→创业板指）
+    - Level 3: 默认兜底（沪深300）
+
+    Args:
+        stock_code: 股票代码，如 "601899", "000001", "300750"
+        days: 获取天数，默认60天
+
+    Returns:
+        包含行业名称、指数代码、指数走势、相对强弱分析的完整报告
+    """
+    try:
+        pro = get_pro_api()
+        ts_code = convert_stock_code(stock_code)
+
+        # 1. 获取个股行业 + 市场板块
+        df_basic = pro.stock_basic(ts_code=ts_code, fields='ts_code,name,industry,market')
+        if df_basic.empty:
+            return f"[not_found] 无法获取股票 {stock_code} 的行业信息"
+
+        stock_name = df_basic.iloc[0]['name']
+        industry_name = df_basic.iloc[0]['industry']
+        market = df_basic.iloc[0].get('market', '')  # 市场板块字段
+
+        # 2. 三级 fallback 策略
+        mapping = None
+        fallback_source = "行业匹配"
+
+        # 2.1 先尝试行业映射
+        if industry_name in INDUSTRY_TO_INDEX:
+            mapping = INDUSTRY_TO_INDEX[industry_name]
+        else:
+            # 2.2 行业无匹配，根据市场板块选择
+            fallback_source = "市场板块"
+            if market == "科创板" or ts_code.startswith("688"):
+                mapping = {"index": "000688.SH", "index_name": "科创50", "futures": None}
+            elif market == "创业板" or ts_code.startswith("300") or ts_code.startswith("301"):
+                mapping = {"index": "399006.SZ", "index_name": "创业板指", "futures": None}
+            else:
+                # 2.3 默认 fallback
+                mapping = INDUSTRY_TO_INDEX["_default"]
+                fallback_source = "默认兜底"
+
+        index_code = mapping["index"]
+        index_name = mapping["index_name"]
+        futures_codes = mapping.get("futures")
+
+        # 3. 获取指数数据
+        index_data = get_index_daily(index_code, days=days)
+
+        # 4. 获取个股数据用于相对强弱对比
+        end_date = datetime.now().strftime('%Y%m%d')
+        start_date = (datetime.now() - timedelta(days=days * 2)).strftime('%Y%m%d')
+
+        df_stock = pro.daily(ts_code=ts_code, start_date=start_date, end_date=end_date)
+
+        relative_strength = ""
+        if not df_stock.empty and len(df_stock) >= 2:
+            df_stock = df_stock.head(days)
+            stock_latest = df_stock.iloc[0]['close']
+            stock_oldest = df_stock.iloc[-1]['close']
+            stock_return = (stock_latest - stock_oldest) / stock_oldest * 100
+
+            # 获取指数同期涨幅
+            df_index = pro.index_daily(ts_code=index_code, start_date=start_date, end_date=end_date)
+            if not df_index.empty and len(df_index) >= 2:
+                df_index = df_index.head(days)
+                index_latest = df_index.iloc[0]['close']
+                index_oldest = df_index.iloc[-1]['close']
+                index_return = (index_latest - index_oldest) / index_oldest * 100
+
+                relative = stock_return - index_return
+                strength_text = "强势（跑赢板块）" if relative > 0 else "弱势（跑输板块）"
+
+                relative_strength = f"""
+## 相对强弱分析
+
+| 指标 | 个股 | 板块 | 差值 |
+|------|------|------|------|
+| 区间涨幅 | {stock_return:+.2f}% | {index_return:+.2f}% | {relative:+.2f}% |
+| 判断 | - | - | **{strength_text}** |
+"""
+
+        # 5. 周期行业提示
+        cyclic_hint = ""
+        if is_cyclic_industry(industry_name):
+            futures_str = ", ".join(futures_codes) if futures_codes else "无"
+            cyclic_hint = f"""
+## 周期行业提示
+
+该股属于**周期资源行业**，建议同时分析商品期货走势：
+- 相关期货代码: {futures_str}
+- 请调用 `get_tushare_fut_daily` 获取期货数据进行联动分析
+"""
+
+        # 6. 格式化输出
+        result = f"""
+# {stock_name}({ts_code}) 板块对比分析
+
+- **所属行业**: {industry_name}
+- **对标指数**: {index_name}({index_code})
+- **匹配方式**: {fallback_source}
+- **周期属性**: {"是（需要期货联动分析）" if is_cyclic_industry(industry_name) else "否"}
+
+{index_data}
+{relative_strength}
+{cyclic_hint}
+"""
+        return result
+
+    except Exception as e:
+        logger.error(f"获取板块数据失败 [{stock_code}]: {e}")
+        return f"[error] 获取板块数据失败: {str(e)}"
 
 
 def get_index_member(index_code: str = "399318.SZ") -> str:
@@ -2493,3 +3317,580 @@ def get_concept(stock_code: str) -> str:
 
     except Exception as e:
         return f"获取概念板块失败: {str(e)}"
+
+
+# ============================================================
+# 行业TAM（Total Addressable Market）数据工具
+# ============================================================
+
+# 行业常数词典 - 用于TAM估算的兜底策略
+INDUSTRY_CONSTANTS = {
+    # 医疗服务行业
+    "医疗服务": {
+        "growth_type": "高增长",
+        "growth_range": "15-25%",
+        "penetration": "低",
+        "logic": "连锁扩张、床位增长、专科复制",
+        "cr5_estimate": 0.15,
+        "comps": ["爱尔眼科", "通策医疗", "海吉亚医疗"],
+        "valuation_method": "PS估值+期权估值",
+        "key_metrics": ["床位数增长", "单店收入", "净利率提升空间"],
+    },
+    "医药生物": {
+        "growth_type": "中高增长",
+        "growth_range": "10-20%",
+        "penetration": "中",
+        "logic": "创新药管线、集采影响、出海逻辑",
+        "cr5_estimate": 0.20,
+        "comps": ["恒瑞医药", "药明康德", "迈瑞医疗"],
+        "valuation_method": "DCF+管线估值",
+        "key_metrics": ["研发投入", "管线进度", "海外收入占比"],
+    },
+    # 银行金融
+    "银行": {
+        "growth_type": "低增长",
+        "growth_range": "5-10%",
+        "penetration": "高",
+        "logic": "息差管理、资产质量、分红稳定",
+        "cr5_estimate": 0.45,
+        "comps": ["工商银行", "建设银行", "招商银行"],
+        "valuation_method": "PB估值+股息率",
+        "key_metrics": ["净息差", "不良率", "拨备覆盖率", "分红率"],
+    },
+    "保险": {
+        "growth_type": "中等增长",
+        "growth_range": "8-15%",
+        "penetration": "中",
+        "logic": "保费增长、投资收益、新业务价值",
+        "cr5_estimate": 0.70,
+        "comps": ["中国平安", "中国人寿", "中国太保"],
+        "valuation_method": "内含价值(EV)估值",
+        "key_metrics": ["新业务价值", "内含价值", "综合成本率"],
+    },
+    "券商": {
+        "growth_type": "周期波动",
+        "growth_range": "-20%~+50%",
+        "penetration": "高",
+        "logic": "成交量弹性、财富管理转型、投行业务",
+        "cr5_estimate": 0.35,
+        "comps": ["中信证券", "华泰证券", "东方财富"],
+        "valuation_method": "PB估值",
+        "key_metrics": ["日均成交额", "两融余额", "资管规模"],
+    },
+    # 周期资源
+    "有色金属": {
+        "growth_type": "周期波动",
+        "growth_range": "-20%~+50%",
+        "penetration": "N/A",
+        "logic": "商品价格弹性、产能周期、库存周期",
+        "cr5_estimate": 0.35,
+        "comps": ["紫金矿业", "洛阳钼业", "江西铜业"],
+        "valuation_method": "周期调整PE+资源储量估值",
+        "key_metrics": ["铜/金/锂价格", "资源储量", "产能利用率"],
+        "commodity_link": ["沪铜", "沪金", "碳酸锂"],
+    },
+    "煤炭": {
+        "growth_type": "周期波动",
+        "growth_range": "-30%~+80%",
+        "penetration": "N/A",
+        "logic": "煤价弹性、产能约束、高分红",
+        "cr5_estimate": 0.30,
+        "comps": ["中国神华", "陕西煤业", "兖矿能源"],
+        "valuation_method": "股息率估值+周期调整PE",
+        "key_metrics": ["动力煤价格", "产能利用率", "分红率"],
+        "commodity_link": ["动力煤期货", "焦煤期货"],
+    },
+    "钢铁": {
+        "growth_type": "周期波动",
+        "growth_range": "-40%~+60%",
+        "penetration": "N/A",
+        "logic": "钢价弹性、产能置换、特钢溢价",
+        "cr5_estimate": 0.25,
+        "comps": ["宝钢股份", "华菱钢铁", "中信特钢"],
+        "valuation_method": "PB估值+周期调整PE",
+        "key_metrics": ["螺纹钢价格", "吨钢毛利", "产能利用率"],
+        "commodity_link": ["螺纹钢期货", "热卷期货"],
+    },
+    "化工": {
+        "growth_type": "周期波动",
+        "growth_range": "-25%~+40%",
+        "penetration": "N/A",
+        "logic": "产品价差、产能周期、一体化优势",
+        "cr5_estimate": 0.20,
+        "comps": ["万华化学", "恒力石化", "荣盛石化"],
+        "valuation_method": "周期调整PE",
+        "key_metrics": ["主要产品价差", "产能利用率", "成本优势"],
+        "commodity_link": ["原油期货", "PTA期货"],
+    },
+    # 消费
+    "白酒": {
+        "growth_type": "中高增长",
+        "growth_range": "10-20%",
+        "penetration": "中",
+        "logic": "价格带升级、渠道扩张、品牌溢价",
+        "cr5_estimate": 0.55,
+        "comps": ["贵州茅台", "五粮液", "泸州老窖"],
+        "valuation_method": "PE估值",
+        "key_metrics": ["批价", "库存周期", "经销商数量"],
+    },
+    "食品饮料": {
+        "growth_type": "中等增长",
+        "growth_range": "8-15%",
+        "penetration": "高",
+        "logic": "消费升级、渠道下沉、品类扩张",
+        "cr5_estimate": 0.35,
+        "comps": ["伊利股份", "海天味业", "农夫山泉"],
+        "valuation_method": "PE估值",
+        "key_metrics": ["营收增速", "毛利率", "渠道覆盖"],
+    },
+    "家电": {
+        "growth_type": "低增长",
+        "growth_range": "3-8%",
+        "penetration": "高",
+        "logic": "存量换新、高端化、出海",
+        "cr5_estimate": 0.60,
+        "comps": ["美的集团", "格力电器", "海尔智家"],
+        "valuation_method": "PE估值+股息率",
+        "key_metrics": ["内销/外销增速", "高端占比", "分红率"],
+    },
+    # 科技成长
+    "新能源": {
+        "growth_type": "高增长",
+        "growth_range": "20-40%",
+        "penetration": "中",
+        "logic": "渗透率提升、技术迭代、产能扩张",
+        "cr5_estimate": 0.40,
+        "comps": ["宁德时代", "比亚迪", "隆基绿能"],
+        "valuation_method": "PE+产能估值",
+        "key_metrics": ["装机量", "渗透率", "产能利用率"],
+    },
+    "半导体": {
+        "growth_type": "高增长",
+        "growth_range": "15-30%",
+        "penetration": "低",
+        "logic": "国产替代、周期复苏、技术突破",
+        "cr5_estimate": 0.25,
+        "comps": ["中芯国际", "韦尔股份", "北方华创"],
+        "valuation_method": "PS估值+周期调整PE",
+        "key_metrics": ["晶圆代工价格", "设备订单", "国产化率"],
+    },
+    "互联网": {
+        "growth_type": "中高增长",
+        "growth_range": "10-25%",
+        "penetration": "高",
+        "logic": "用户变现、AI赋能、出海增量",
+        "cr5_estimate": 0.70,
+        "comps": ["腾讯控股", "阿里巴巴", "美团"],
+        "valuation_method": "SOTP+PE估值",
+        "key_metrics": ["MAU", "ARPU", "变现率"],
+    },
+    # 公用事业
+    "电力": {
+        "growth_type": "低增长",
+        "growth_range": "3-8%",
+        "penetration": "高",
+        "logic": "电价市场化、绿电溢价、稳定分红",
+        "cr5_estimate": 0.35,
+        "comps": ["长江电力", "华能国际", "国电电力"],
+        "valuation_method": "股息率估值",
+        "key_metrics": ["上网电价", "利用小时数", "分红率"],
+    },
+    "燃气": {
+        "growth_type": "中等增长",
+        "growth_range": "8-15%",
+        "penetration": "中",
+        "logic": "气量增长、顺价机制、接驳费",
+        "cr5_estimate": 0.25,
+        "comps": ["新奥股份", "昆仑能源", "华润燃气"],
+        "valuation_method": "PE估值",
+        "key_metrics": ["售气量增速", "价差", "接驳户数"],
+    },
+    # 地产建筑
+    "房地产": {
+        "growth_type": "低增长/负增长",
+        "growth_range": "-10%~+5%",
+        "penetration": "高",
+        "logic": "集中度提升、土储价值、政策边际改善",
+        "cr5_estimate": 0.25,
+        "comps": ["保利发展", "万科A", "招商蛇口"],
+        "valuation_method": "NAV估值",
+        "key_metrics": ["销售额", "土储货值", "融资成本"],
+    },
+    "建筑": {
+        "growth_type": "低增长",
+        "growth_range": "0-8%",
+        "penetration": "高",
+        "logic": "订单增长、现金流改善、一带一路",
+        "cr5_estimate": 0.40,
+        "comps": ["中国建筑", "中国中铁", "中国交建"],
+        "valuation_method": "PE估值+订单估值",
+        "key_metrics": ["新签订单", "营收确认进度", "经营现金流"],
+    },
+}
+
+# 申万行业代码映射（用于获取行业成分股）
+SHENWAN_INDUSTRY_CODES = {
+    "银行": "801780.SI",
+    "非银金融": "801790.SI",
+    "房地产": "801180.SI",
+    "建筑装饰": "801720.SI",
+    "建筑材料": "801710.SI",
+    "钢铁": "801040.SI",
+    "有色金属": "801050.SI",
+    "煤炭": "801020.SI",
+    "石油石化": "801960.SI",
+    "化工": "801030.SI",
+    "电力设备": "801730.SI",
+    "机械设备": "801890.SI",
+    "国防军工": "801740.SI",
+    "汽车": "801880.SI",
+    "家用电器": "801110.SI",
+    "食品饮料": "801120.SI",
+    "纺织服饰": "801130.SI",
+    "轻工制造": "801140.SI",
+    "医药生物": "801150.SI",
+    "公用事业": "801160.SI",
+    "交通运输": "801170.SI",
+    "商贸零售": "801200.SI",
+    "社会服务": "801210.SI",
+    "传媒": "801760.SI",
+    "通信": "801770.SI",
+    "计算机": "801750.SI",
+    "电子": "801080.SI",
+    "农林牧渔": "801010.SI",
+    "综合": "801230.SI",
+    "美容护理": "801980.SI",
+    "环保": "801970.SI",
+}
+
+# ═══════════════════════════════════════════════════════════════
+# 行业 → 指数/期货 映射表（用于板块对比和商品联动分析）
+# ═══════════════════════════════════════════════════════════════
+INDUSTRY_TO_INDEX = {
+    # 周期资源行业（需要期货联动）- 申万一级
+    "有色金属": {"index": "399318.SZ", "index_name": "国证有色", "futures": ["CU.SHF", "AL.SHF", "AU.SHF", "AG.SHF"]},
+    "煤炭": {"index": "399998.SZ", "index_name": "中证煤炭", "futures": ["ZC.ZCE", "JM.DCE"]},
+    "钢铁": {"index": "399994.SZ", "index_name": "中证有色", "futures": ["RB.SHF", "HC.SHF"]},
+    "化工": {"index": "399993.SZ", "index_name": "中证化工", "futures": ["MA.ZCE", "TA.ZCE", "PTA.ZCE"]},
+    "基础化工": {"index": "399993.SZ", "index_name": "中证化工", "futures": ["MA.ZCE", "TA.ZCE"]},
+    "石油石化": {"index": "399975.SZ", "index_name": "证券龙头", "futures": ["SC.INE", "FU.SHF"]},
+
+    # 有色金属细分行业（Tushare返回的可能是细分行业名）
+    "铜": {"index": "399318.SZ", "index_name": "国证有色", "futures": ["CU.SHF"]},
+    "金": {"index": "399318.SZ", "index_name": "国证有色", "futures": ["AU.SHF"]},
+    "黄金": {"index": "399318.SZ", "index_name": "国证有色", "futures": ["AU.SHF"]},
+    "银": {"index": "399318.SZ", "index_name": "国证有色", "futures": ["AG.SHF"]},
+    "白银": {"index": "399318.SZ", "index_name": "国证有色", "futures": ["AG.SHF"]},
+    "铝": {"index": "399318.SZ", "index_name": "国证有色", "futures": ["AL.SHF"]},
+    "锌": {"index": "399318.SZ", "index_name": "国证有色", "futures": ["ZN.SHF"]},
+    "铅": {"index": "399318.SZ", "index_name": "国证有色", "futures": ["PB.SHF"]},
+    "镍": {"index": "399318.SZ", "index_name": "国证有色", "futures": ["NI.SHF"]},
+    "锡": {"index": "399318.SZ", "index_name": "国证有色", "futures": ["SN.SHF"]},
+    "稀土": {"index": "399318.SZ", "index_name": "国证有色", "futures": None},
+    "锂": {"index": "399318.SZ", "index_name": "国证有色", "futures": ["LC.GFE"]},
+    "钴": {"index": "399318.SZ", "index_name": "国证有色", "futures": None},
+    "钨": {"index": "399318.SZ", "index_name": "国证有色", "futures": None},
+    "钼": {"index": "399318.SZ", "index_name": "国证有色", "futures": None},
+
+    # 煤炭细分行业
+    "煤炭开采": {"index": "399998.SZ", "index_name": "中证煤炭", "futures": ["ZC.ZCE", "JM.DCE"]},
+    "焦炭": {"index": "399998.SZ", "index_name": "中证煤炭", "futures": ["J.DCE", "JM.DCE"]},
+
+    # 钢铁细分行业
+    "普钢": {"index": "399994.SZ", "index_name": "中证有色", "futures": ["RB.SHF", "HC.SHF"]},
+    "特钢": {"index": "399994.SZ", "index_name": "中证有色", "futures": ["RB.SHF"]},
+
+    # 金融行业
+    "银行": {"index": "399986.SZ", "index_name": "中证银行", "futures": None},
+    "非银金融": {"index": "399975.SZ", "index_name": "中证证券", "futures": None},
+    "证券": {"index": "399975.SZ", "index_name": "中证证券", "futures": None},      # 东方财富、中信证券等
+    "保险": {"index": "399986.SZ", "index_name": "中证银行", "futures": None},       # 保险与银行同属大金融
+    "多元金融": {"index": "399975.SZ", "index_name": "中证证券", "futures": None},   # 信托、期货等
+
+    # 成长行业
+    "电子": {"index": "399678.SZ", "index_name": "深证电子", "futures": None},
+    "计算机": {"index": "399996.SZ", "index_name": "中证信息", "futures": None},
+    "通信": {"index": "399996.SZ", "index_name": "中证信息", "futures": None},
+    "传媒": {"index": "399996.SZ", "index_name": "中证信息", "futures": None},
+    "医药生物": {"index": "399989.SZ", "index_name": "中证医药", "futures": None},
+
+    # 半导体及集成电路（科技硬件）- 中芯国际等
+    "半导体": {"index": "399976.SZ", "index_name": "中证半导", "futures": None},
+    "集成电路": {"index": "399976.SZ", "index_name": "中证半导", "futures": None},
+    "芯片": {"index": "399976.SZ", "index_name": "中证半导", "futures": None},
+    "半导体材料": {"index": "399976.SZ", "index_name": "中证半导", "futures": None},
+    "半导体设备": {"index": "399976.SZ", "index_name": "中证半导", "futures": None},
+
+    # 电子元器件（消费电子）
+    "元器件": {"index": "399978.SZ", "index_name": "中证元器件", "futures": None},
+    "电子元器件": {"index": "399978.SZ", "index_name": "中证元器件", "futures": None},
+    "PCB": {"index": "399978.SZ", "index_name": "中证元器件", "futures": None},
+    "被动元件": {"index": "399978.SZ", "index_name": "中证元器件", "futures": None},
+
+    # 通信设备细分
+    "通信设备": {"index": "399996.SZ", "index_name": "中证信息", "futures": None},
+    "通信服务": {"index": "399996.SZ", "index_name": "中证信息", "futures": None},
+    "光通信": {"index": "399996.SZ", "index_name": "中证信息", "futures": None},
+
+    # 软件与IT服务
+    "软件服务": {"index": "399996.SZ", "index_name": "中证信息", "futures": None},
+    "软件开发": {"index": "399996.SZ", "index_name": "中证信息", "futures": None},
+    "IT服务": {"index": "399996.SZ", "index_name": "中证信息", "futures": None},
+    "互联网服务": {"index": "399996.SZ", "index_name": "中证信息", "futures": None},
+    "云计算": {"index": "399996.SZ", "index_name": "中证信息", "futures": None},
+
+    # 光学光电
+    "光学光电子": {"index": "399678.SZ", "index_name": "深证电子", "futures": None},
+    "消费电子": {"index": "399678.SZ", "index_name": "深证电子", "futures": None},
+    "电力设备": {"index": "399808.SZ", "index_name": "中证新能", "futures": None},
+    # 电力设备细分行业（Tushare返回的可能是不同名称）
+    "电气设备": {"index": "399808.SZ", "index_name": "中证新能", "futures": None},  # 宁德时代等
+    "电器仪表": {"index": "399808.SZ", "index_name": "中证新能", "futures": None},  # 兼容旧版分类
+    "电源设备": {"index": "399808.SZ", "index_name": "中证新能", "futures": None},  # 细分
+    "新能源": {"index": "399808.SZ", "index_name": "中证新能", "futures": None},    # 新能源整体
+    "光伏设备": {"index": "399808.SZ", "index_name": "中证新能", "futures": None},  # 光伏细分
+    "风电设备": {"index": "399808.SZ", "index_name": "中证新能", "futures": None},  # 风电细分
+    "储能设备": {"index": "399808.SZ", "index_name": "中证新能", "futures": None},  # 储能细分
+    "电池": {"index": "399808.SZ", "index_name": "中证新能", "futures": None},      # 电池细分
+
+    # 消费行业
+    "食品饮料": {"index": "399987.SZ", "index_name": "中证酒", "futures": None},
+    "家用电器": {"index": "399987.SZ", "index_name": "中证酒", "futures": None},
+    "汽车": {"index": "399971.SZ", "index_name": "中证汽车", "futures": None},
+    "商贸零售": {"index": "399971.SZ", "index_name": "中证汽车", "futures": None},
+    "社会服务": {"index": "399971.SZ", "index_name": "中证汽车", "futures": None},
+    "纺织服饰": {"index": "399971.SZ", "index_name": "中证汽车", "futures": None},
+    "美容护理": {"index": "399971.SZ", "index_name": "中证汽车", "futures": None},
+
+    # 其他行业
+    "房地产": {"index": "399393.SZ", "index_name": "国证地产", "futures": None},
+    "建筑装饰": {"index": "399393.SZ", "index_name": "国证地产", "futures": None},
+    "建筑材料": {"index": "399393.SZ", "index_name": "国证地产", "futures": None},
+    "交通运输": {"index": "399106.SZ", "index_name": "深证综指", "futures": None},
+    "公用事业": {"index": "399106.SZ", "index_name": "深证综指", "futures": None},
+    "机械设备": {"index": "399106.SZ", "index_name": "深证综指", "futures": None},
+    "国防军工": {"index": "399106.SZ", "index_name": "深证综指", "futures": None},
+    "轻工制造": {"index": "399106.SZ", "index_name": "深证综指", "futures": None},
+    "农林牧渔": {"index": "399106.SZ", "index_name": "深证综指", "futures": None},
+    "环保": {"index": "399106.SZ", "index_name": "深证综指", "futures": None},
+    "综合": {"index": "399106.SZ", "index_name": "深证综指", "futures": None},
+
+    # 默认值
+    "_default": {"index": "000300.SH", "index_name": "沪深300", "futures": None},
+}
+
+# 周期行业集合（用于判断是否需要期货联动分析）
+# 包含申万一级行业和细分行业
+CYCLIC_INDUSTRIES = {
+    # 申万一级
+    "有色金属", "煤炭", "钢铁", "化工", "基础化工", "石油石化",
+    # 有色细分
+    "铜", "金", "黄金", "银", "白银", "铝", "锌", "铅", "镍", "锡", "稀土", "锂", "钴", "钨", "钼",
+    # 煤炭细分
+    "煤炭开采", "焦炭",
+    # 钢铁细分
+    "普钢", "特钢",
+}
+
+
+def get_industry_index_code(industry: str) -> str:
+    """根据行业名称获取对应的指数代码"""
+    mapping = INDUSTRY_TO_INDEX.get(industry, INDUSTRY_TO_INDEX["_default"])
+    return mapping["index"]
+
+
+def get_industry_futures_codes(industry: str) -> list:
+    """根据行业名称获取对应的期货代码列表"""
+    mapping = INDUSTRY_TO_INDEX.get(industry, INDUSTRY_TO_INDEX["_default"])
+    return mapping.get("futures") or []
+
+
+def is_cyclic_industry(industry: str) -> bool:
+    """判断是否为周期行业（需要期货联动分析）"""
+    return industry in CYCLIC_INDUSTRIES
+
+
+def get_industry_index_name(industry: str) -> str:
+    """根据行业名称获取对应的指数名称"""
+    mapping = INDUSTRY_TO_INDEX.get(industry, INDUSTRY_TO_INDEX["_default"])
+    return mapping["index_name"]
+
+
+def get_industry_tam_data(industry: str, stock_code: str = None) -> str:
+    """
+    获取行业TAM（Total Addressable Market）和市场格局数据
+
+    采用三级降级策略：
+    - Level 1: 精确TAM数据（如有行业研报数据）
+    - Level 2: Top5营收估算 + 行业特征（使用Tushare数据）
+    - Level 3: 行业常数词典描述（兜底方案）
+
+    Args:
+        industry: 行业名称（如"医疗服务"、"银行"、"有色金属"等）
+        stock_code: 可选，股票代码，用于确定具体行业归属
+
+    Returns:
+        行业TAM估算、增长特征、竞争格局的格式化字符串
+    """
+    try:
+        pro = get_pro_api()
+        result = []
+        result.append(f"# 行业TAM与市场格局分析\n")
+        result.append(f"**目标行业**: {industry}\n")
+
+        # 尝试匹配行业常数
+        industry_info = None
+        matched_industry = None
+
+        # 精确匹配
+        if industry in INDUSTRY_CONSTANTS:
+            industry_info = INDUSTRY_CONSTANTS[industry]
+            matched_industry = industry
+        else:
+            # 模糊匹配
+            for key in INDUSTRY_CONSTANTS:
+                if key in industry or industry in key:
+                    industry_info = INDUSTRY_CONSTANTS[key]
+                    matched_industry = key
+                    break
+
+        # Level 2: 尝试获取Top5数据进行TAM估算
+        level2_success = False
+        if matched_industry and matched_industry in SHENWAN_INDUSTRY_CODES:
+            try:
+                index_code = SHENWAN_INDUSTRY_CODES[matched_industry]
+
+                # 获取行业成分股
+                df_members = pro.index_member(index_code=index_code)
+                if df_members is not None and not df_members.empty:
+                    # 获取成分股的市值和营收数据
+                    member_codes = df_members['con_code'].tolist()[:20]  # 取前20只计算
+
+                    # 获取最新财务数据
+                    total_revenue = 0
+                    total_market_cap = 0
+                    company_data = []
+
+                    for code in member_codes[:10]:  # 取Top10
+                        try:
+                            # 获取市值数据
+                            df_basic = pro.daily_basic(
+                                ts_code=code,
+                                fields='ts_code,total_mv,pe_ttm,pb'
+                            )
+                            if df_basic is not None and not df_basic.empty:
+                                mv = df_basic.iloc[0].get('total_mv', 0)
+                                if mv and mv > 0:
+                                    total_market_cap += mv
+
+                            # 获取最新年报营收
+                            df_income = pro.income(
+                                ts_code=code,
+                                fields='ts_code,end_date,revenue,n_income'
+                            )
+                            if df_income is not None and not df_income.empty:
+                                # 取最新一期
+                                df_income = df_income.sort_values('end_date', ascending=False)
+                                revenue = df_income.iloc[0].get('revenue', 0)
+                                if revenue and revenue > 0:
+                                    total_revenue += revenue
+                                    company_data.append({
+                                        'code': code,
+                                        'revenue': revenue / 1e8,  # 转换为亿元
+                                        'market_cap': mv / 1e4 if mv else 0  # 转换为亿元
+                                    })
+                        except Exception:
+                            continue
+
+                    if total_revenue > 0 and industry_info:
+                        cr5 = industry_info.get('cr5_estimate', 0.3)
+                        # 估算行业TAM
+                        top10_revenue = total_revenue / 1e8  # 亿元
+                        estimated_tam = top10_revenue / cr5 if cr5 > 0 else top10_revenue * 3
+
+                        result.append("## Level 2: Top企业估算\n")
+                        result.append(f"**数据来源**: Tushare行业成分股财务数据\n")
+                        result.append(f"**采样范围**: {matched_industry}行业Top10上市公司\n")
+                        result.append(f"**Top10合计营收**: {top10_revenue:.1f} 亿元\n")
+                        result.append(f"**行业集中度假设(CR5)**: {cr5*100:.0f}%\n")
+                        result.append(f"**估算行业TAM**: {estimated_tam:.0f} 亿元\n")
+                        result.append(f"**Top10合计市值**: {total_market_cap/1e4:.0f} 亿元\n")
+                        result.append("")
+
+                        # Top5详情
+                        if company_data:
+                            company_data.sort(key=lambda x: x['revenue'], reverse=True)
+                            result.append("### Top5企业营收")
+                            result.append("| 排名 | 代码 | 营收(亿) | 市值(亿) |")
+                            result.append("|-----|------|---------|---------|")
+                            for i, c in enumerate(company_data[:5]):
+                                result.append(f"| {i+1} | {c['code']} | {c['revenue']:.1f} | {c['market_cap']:.0f} |")
+                            result.append("")
+
+                        level2_success = True
+
+            except Exception as e:
+                result.append(f"*Level 2数据获取异常: {str(e)[:50]}*\n")
+
+        # Level 3: 行业常数词典（兜底或补充）
+        if industry_info:
+            result.append("## 行业特征画像\n")
+            result.append(f"**增长类型**: {industry_info.get('growth_type', 'N/A')}\n")
+            result.append(f"**增速区间**: {industry_info.get('growth_range', 'N/A')}\n")
+            result.append(f"**渗透率水平**: {industry_info.get('penetration', 'N/A')}\n")
+            result.append(f"**核心逻辑**: {industry_info.get('logic', 'N/A')}\n")
+            result.append(f"**推荐估值方法**: {industry_info.get('valuation_method', 'N/A')}\n")
+            result.append("")
+
+            # 可比公司
+            comps = industry_info.get('comps', [])
+            if comps:
+                result.append(f"**行业龙头**: {', '.join(comps)}\n")
+
+            # 关键指标
+            key_metrics = industry_info.get('key_metrics', [])
+            if key_metrics:
+                result.append(f"**关键跟踪指标**: {', '.join(key_metrics)}\n")
+
+            # 商品联动（周期股）
+            commodity_link = industry_info.get('commodity_link', [])
+            if commodity_link:
+                result.append(f"**商品价格联动**: {', '.join(commodity_link)}\n")
+
+            result.append("")
+
+            # 多头策略提示
+            result.append("## 多头策略适用性\n")
+            growth_type = industry_info.get('growth_type', '')
+            if '高增长' in growth_type:
+                result.append("**适用策略**: 成长股终局思维\n")
+                result.append("- TAM倒推法：市场规模 × 份额假设 = 未来营收\n")
+                result.append("- PS对标法：对比可比公司扩张期PS\n")
+                result.append("- 期权估值：基础业务 + 技术/产能期权\n")
+            elif '周期' in growth_type:
+                result.append("**适用策略**: 周期股逆向布局\n")
+                result.append("- 周期悖论：高PE=盈利底部=买入信号\n")
+                result.append("- 产能出清：竞争对手退出=龙头红利\n")
+                result.append("- 商品弹性：价格回升=利润高弹性\n")
+            else:
+                result.append("**适用策略**: 价值股时间复利\n")
+                result.append("- 股息复利：股息再投资的长期增值\n")
+                result.append("- 均值回归：历史分位的均值回归机会\n")
+                result.append("- 资产重估：PB破净时的隐藏价值\n")
+
+        else:
+            # 未匹配到行业常数
+            result.append("## 行业数据状态\n")
+            result.append(f"**注意**: 未在预设行业库中找到「{industry}」的精确匹配\n")
+            result.append("建议使用基本面报告中的行业判断，或指定更具体的行业名称\n")
+            result.append("")
+            result.append("**可用行业**: " + ", ".join(list(INDUSTRY_CONSTANTS.keys())[:10]) + "...\n")
+
+        # 数据时效性提示
+        result.append("\n---")
+        result.append("*数据说明: TAM估算基于上市公司公开财务数据，仅供参考*")
+
+        return "\n".join(result)
+
+    except Exception as e:
+        return f"获取行业TAM数据失败: {str(e)}"

@@ -248,23 +248,35 @@ class TongDaXinDataProvider:
                 return {}
 
             quote = data[0]
-            
+
             # 安全获取字段，避免KeyError
             def safe_get(key, default=0):
                 return quote.get(key, default)
 
+            # === 价格兜底逻辑：非交易时间price可能返回0 ===
+            price = safe_get('price')
+            last_close = safe_get('last_close')
+            if price <= 0 and last_close > 0:
+                # 使用昨收价作为当前价格（非交易时间）
+                price = last_close
+                change = 0
+                change_percent = 0
+            else:
+                change = price - last_close if last_close > 0 else 0
+                change_percent = (change / last_close * 100) if last_close > 0 else 0
+
             return {
                 'code': stock_code,
                 'name': self._get_stock_name(stock_code),  # 使用独立的股票名称获取方法
-                'price': safe_get('price'),
-                'last_close': safe_get('last_close'),
+                'price': price,
+                'last_close': last_close,
                 'open': safe_get('open'),
                 'high': safe_get('high'),
                 'low': safe_get('low'),
                 'volume': safe_get('vol'),
                 'amount': safe_get('amount'),
-                'change': safe_get('price') - safe_get('last_close'),
-                'change_percent': ((safe_get('price') - safe_get('last_close')) / safe_get('last_close') * 100) if safe_get('last_close') > 0 else 0,
+                'change': change,
+                'change_percent': change_percent,
                 'bid_prices': [safe_get(f'bid{i}') for i in range(1, 6)],
                 'bid_volumes': [safe_get(f'bid_vol{i}') for i in range(1, 6)],
                 'ask_prices': [safe_get(f'ask{i}') for i in range(1, 6)],
@@ -484,7 +496,7 @@ class TongDaXinDataProvider:
         if not self.connected:
             if not self.connect():
                 return {}
-        
+
         try:
             # 获取主要指数数据
             indices = {
@@ -493,25 +505,37 @@ class TongDaXinDataProvider:
                 '创业板指': ('0', '399006'),
                 '科创50': ('1', '000688')
             }
-            
+
             market_data = {}
-            
+
             for name, (market, code) in indices.items():
                 try:
                     data = self.api.get_security_quotes([(int(market), code)])
                     if data:
                         quote = data[0]
+                        price = quote['price']
+                        last_close = quote['last_close']
+
+                        # 修复：非交易时间深圳指数price可能返回0，使用last_close作为备用
+                        if price == 0 and last_close > 0:
+                            price = last_close  # 非交易时间使用昨收价
+                            change = 0
+                            change_percent = 0
+                        else:
+                            change = price - last_close if last_close > 0 else 0
+                            change_percent = (change / last_close * 100) if last_close > 0 else 0
+
                         market_data[name] = {
-                            'price': quote['price'],
-                            'change': quote['price'] - quote['last_close'],
-                            'change_percent': ((quote['price'] - quote['last_close']) / quote['last_close'] * 100) if quote['last_close'] > 0 else 0,
+                            'price': price,
+                            'change': change,
+                            'change_percent': change_percent,
                             'volume': quote['vol']
                         }
                 except:
                     continue
-            
+
             return market_data
-            
+
         except Exception as e:
             print(f"获取市场概览失败: {e}")
             return {}
@@ -875,9 +899,21 @@ def get_china_stock_data(stock_code: str, start_date: str, end_date: str) -> str
         # 获取实时数据
         realtime_data = provider.get_real_time_data(stock_code)
 
+        # === 价格兜底逻辑：非交易时间实时价格可能为0 ===
+        realtime_price = realtime_data.get('price', 0)
+        if realtime_price <= 0 and not df.empty:
+            # 使用最新K线收盘价作为兜底
+            realtime_price = df['Close'].iloc[-1]
+            realtime_data['price'] = realtime_price
+            # 涨跌幅也需要重新计算（基于K线数据）
+            if len(df) >= 2:
+                prev_close = df['Close'].iloc[-2]
+                if prev_close > 0:
+                    realtime_data['change_percent'] = (realtime_price - prev_close) / prev_close * 100
+
         # 获取技术指标
         indicators = provider.get_stock_technical_indicators(stock_code)
-        
+
         # 格式化输出
         result = f"""
 # {stock_code} 股票数据分析
