@@ -10,6 +10,14 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from tradingagents.agents.utils.agent_utils import is_china_stock
+from tradingagents.agents.utils.valuation_validator import (
+    validate_valuation_report,
+    format_validation_warnings,
+    extract_daily_basic_from_report,
+    validate_dividend_yield,
+    is_high_dividend_stock,
+    extract_target_price
+)
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +177,30 @@ def _auto_update_past_outcomes(
 
 CONSOLIDATION_SYSTEM_PROMPT = '''您是一位资深的A股投资研究总监，负责整合团队的研究成果并撰写最终的综合研究报告。
 
+═══════════════════════════════════════════════════════════════
+【跨语言思维链指令】Cross-Lingual Chain of Thought
+═══════════════════════════════════════════════════════════════
+
+**Step 1: Think in English** (Internal reasoning)
+For report synthesis, valuation calculation, and risk-reward analysis:
+- Use English to structure your analytical framework
+- Apply universal standards: DCF, PE/PB valuation, risk matrix
+- Ensure mathematical accuracy in target price derivation
+
+**Step 2: Preserve A-share Context** (Domain knowledge)
+以下内容必须用中文理解，不可英文化：
+- 投资术语：强烈买入/买入/持有/减持/卖出
+- 资金术语：北向资金、融资余额、主力资金、香港中央结算
+- 市场术语：涨停板、板块轮动、龙头效应、抱团股
+- 风险术语：质押风险、解禁压力、商誉减值
+
+**Step 3: Output in Chinese** (Final response)
+- 使用中文输出专业研报
+- 数据引用必须标明来源
+- 投资建议必须具体可执行
+
+═══════════════════════════════════════════════════════════════
+
 ## 输入报告
 
 您将收到以下8份分析材料：
@@ -218,7 +250,10 @@ CONSOLIDATION_SYSTEM_PROMPT = '''您是一位资深的A股投资研究总监，�
 
 #### 2.3 资金面评估
 - 主力资金动向：近X日净流入/流出 XX万元（据情绪报告）
-- 北向资金态度：持股比例变化、近期增减持
+- 外资态度（基于前十大股东季度数据）：
+  - 香港中央结算持股占比X%，较上期±Y%（数据来源：YYYY年Q季报）
+  - 是否进入沪深港通十大成交股（反映外资交易活跃度）
+  - ⚠️ 北向资金日度数据已于2024年8月停更，仅季度数据可用
 - 融资余额：XX亿元，近X日变化 XX%（判断杠杆情绪）
 
 #### 2.4 消息面评估
@@ -611,6 +646,83 @@ def create_consolidation_analyst(llm, decision_memory=None):
 
 请查看各独立分析报告获取详细信息。
 """
+
+        # ========== 1.5 估值数据一致性验证 ==========
+        try:
+            fundamentals_report = state.get("fundamentals_report", "")
+            if fundamentals_report and current_price:
+                # 从基本面报告中提取估值数据
+                daily_basic_data = extract_daily_basic_from_report(fundamentals_report)
+
+                # 执行验证
+                validation_result = validate_valuation_report(
+                    fundamentals_report=fundamentals_report,
+                    current_price=current_price,
+                    daily_basic_data=daily_basic_data
+                )
+
+                # 如果验证不通过，在报告开头插入警告
+                if not validation_result.get("passed", True):
+                    warning_text = format_validation_warnings(validation_result)
+                    if warning_text:
+                        # 在报告标题后插入警告
+                        lines = consolidation_report.split('\n')
+                        insert_pos = 0
+                        for i, line in enumerate(lines):
+                            if line.startswith('# ') or line.startswith('**分析日期'):
+                                insert_pos = i + 1
+                                if line.startswith('**分析日期'):
+                                    break
+                        lines.insert(insert_pos, '\n' + warning_text)
+                        consolidation_report = '\n'.join(lines)
+                        logger.warning(f"[Validation] 估值验证发现问题: {validation_result.get('warnings', [])}")
+                else:
+                    logger.info("[Validation] PE/PB估值数据验证通过")
+
+                # ========== 1.6 股息率交叉验证（对高股息股票）==========
+                if is_high_dividend_stock(fundamentals_report):
+                    primary_target = extract_target_price(consolidation_report) or extract_target_price(fundamentals_report)
+                    div_validation = validate_dividend_yield(
+                        fundamentals_report=fundamentals_report,
+                        current_price=current_price,
+                        primary_target_price=primary_target
+                    )
+
+                    if div_validation.get("applicable") and not div_validation.get("passed", True):
+                        # 合并股息率验证警告到现有警告
+                        div_warnings = div_validation.get("warnings", [])
+                        if div_warnings:
+                            div_warning_text = "\n## ⚠️ 股息率验证警告\n\n"
+                            for i, w in enumerate(div_warnings, 1):
+                                div_warning_text += f"{i}. {w}\n"
+                            div_warning_text += "\n---\n"
+
+                            # 插入到报告中
+                            lines = consolidation_report.split('\n')
+                            insert_pos = 0
+                            for i, line in enumerate(lines):
+                                if '数据一致性警告' in line or line.startswith('## 一、'):
+                                    insert_pos = i
+                                    break
+                            if insert_pos > 0:
+                                lines.insert(insert_pos, div_warning_text)
+                            else:
+                                # 找报告开头插入
+                                for i, line in enumerate(lines):
+                                    if line.startswith('# ') or line.startswith('**分析日期'):
+                                        insert_pos = i + 1
+                                        if line.startswith('**分析日期'):
+                                            break
+                                lines.insert(insert_pos, '\n' + div_warning_text)
+                            consolidation_report = '\n'.join(lines)
+                            logger.warning(f"[Validation] 股息率验证发现问题: {div_warnings}")
+                    elif div_validation.get("applicable"):
+                        logger.info("[Validation] 股息率验证通过")
+                        details = div_validation.get("details", {})
+                        if details.get("dividend_target_price"):
+                            logger.info(f"[Validation] 股息率目标价: {details['dividend_target_price']:.2f}元")
+        except Exception as e:
+            logger.warning(f"[Validation] 估值验证过程出错: {e}")
 
         # ========== 2. 记录本次决策到 Memory ==========
         logger.info(f"[Memory] decision_memory is None: {decision_memory is None}")
